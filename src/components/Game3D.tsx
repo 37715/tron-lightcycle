@@ -23,7 +23,7 @@ const REGEN_DELAY_FRAMES = 60; // start regenerating after ~1s
 const DAMAGE_RATE = 0.8; // health lost per frame while pushing into a wall
 
 const TRAIL_START_HEIGHT = 0.2; // height near the bike
-const TRAIL_END_HEIGHT = 0.5;   // final wall height
+const TRAIL_END_HEIGHT = 0.6;   // final wall height slightly taller
 const TAPER_DISTANCE = 1;       // distance over which to reach full height
 
 const Game3D: React.FC = () => {
@@ -158,7 +158,9 @@ const Game3D: React.FC = () => {
       const progress = Math.min(dist / TAPER_DISTANCE, 1);
       const height = THREE.MathUtils.lerp(TRAIL_START_HEIGHT, TRAIL_END_HEIGHT, progress);
       const scale = height / TRAIL_END_HEIGHT;
-      posAttr.setY(i, posAttr.getY(i) * scale);
+      const originalY = posAttr.getY(i);
+      const offset = (scale - 1) * (TRAIL_END_HEIGHT / 2);
+      posAttr.setY(i, originalY * scale + offset);
     }
     posAttr.needsUpdate = true;
 
@@ -257,10 +259,22 @@ const Game3D: React.FC = () => {
     const collision = checkCollisions(newPosition, bike.trail);
     if (collision.hit && collision.normal) {
       const push = delta.dot(collision.normal);
+      const axis = Math.abs(collision.normal.x) > 0 ? 'x' : 'z';
+      const half = 0.15;
+      const limit = BOUNDARY_LIMIT - 0.001;
+      let overshoot = Math.abs(newPosition[axis]) + half - limit;
+      if (overshoot < 0) overshoot = 0;
+
       if (push > 0) {
         // Slide along the surface and accumulate grind offset
-        newPosition.addScaledVector(collision.normal, -push);
-        newGrindOffset = Math.min(bike.grindOffset + push, 0.3);
+        newPosition.addScaledVector(collision.normal, -(push + overshoot));
+      } else {
+        // Clamp out of the wall when turning away
+        newPosition.addScaledVector(collision.normal, -overshoot);
+      }
+
+      if (push > 0 || overshoot > 0) {
+        newGrindOffset = Math.min(bike.grindOffset + push + overshoot, 0.3);
         currentHealth = Math.max(0, bike.health - DAMAGE_RATE);
         setBikeHealth(currentHealth);
         lastHitFrameRef.current = frameCountRef.current;
