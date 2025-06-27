@@ -12,6 +12,10 @@ interface BikeState {
   maxHealth: number;
 }
 
+// Tunable gameplay constants
+const BIKE_SPEED = 0.12; // slightly slower default speed
+const TURN_DELAY_FRAMES = 20; // minimum frames between consecutive turns
+
 const Game3D: React.FC = () => {
   const mountRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene>();
@@ -32,7 +36,7 @@ const Game3D: React.FC = () => {
     rotation: 0,
     trail: [],
     alive: true,
-    speed: 0.15,
+    speed: BIKE_SPEED,
     lastTurnFrame: 0,
     health: 100,
     maxHealth: 100
@@ -180,9 +184,9 @@ const Game3D: React.FC = () => {
     let newRotation = bike.rotation;
     let newLastTurnFrame = bike.lastTurnFrame;
     
-    // Fixed turn delay - 15 frames between ANY turns for consistency
+    // Simple delay to keep consecutive turns slightly apart
     const framesSinceLastTurn = frameCountRef.current - bike.lastTurnFrame;
-    const canTurn = framesSinceLastTurn >= 15;
+    const canTurn = framesSinceLastTurn >= TURN_DELAY_FRAMES;
     
     if (canTurn) {
       // Check for left turn
@@ -351,7 +355,7 @@ const Game3D: React.FC = () => {
       rotation: 0,
       trail: [initialPosition.clone()],
       alive: true,
-      speed: 0.15,
+      speed: BIKE_SPEED,
       lastTurnFrame: 0,
       health: 100,
       maxHealth: 100

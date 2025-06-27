@@ -17,7 +17,8 @@ interface Player {
 const GRID_SIZE = 4;
 const GAME_WIDTH = 800;
 const GAME_HEIGHT = 600;
-const MOVE_SPEED = 120; // milliseconds between moves
+const MOVE_SPEED = 150; // milliseconds between moves (slower)
+const TURN_DELAY = 200; // milliseconds delay between consecutive turns
 
 const Game: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -25,6 +26,7 @@ const Game: React.FC = () => {
   const [winner, setWinner] = useState<number | null>(null);
   const gameLoopRef = useRef<number>();
   const lastMoveTimeRef = useRef<number>(0);
+  const lastTurnTimeRef = useRef<Record<number, number>>({ 1: 0, 2: 0 });
   
   const [players, setPlayers] = useState<Player[]>([
     {
@@ -173,29 +175,41 @@ const Game: React.FC = () => {
   const handleKeyPress = useCallback((event: KeyboardEvent) => {
     if (gameState !== 'playing') return;
 
+    const now = performance.now();
+
     setPlayers(prevPlayers => prevPlayers.map(player => {
       if (player.id === 1) {
+        if (now - lastTurnTimeRef.current[1] < TURN_DELAY) return player;
         switch (event.key.toLowerCase()) {
           case 'w':
-            return player.direction !== 'down' ? { ...player, direction: 'up' } : player;
+            if (player.direction !== 'down') { lastTurnTimeRef.current[1] = now; return { ...player, direction: 'up' }; }
+            break;
           case 's':
-            return player.direction !== 'up' ? { ...player, direction: 'down' } : player;
+            if (player.direction !== 'up') { lastTurnTimeRef.current[1] = now; return { ...player, direction: 'down' }; }
+            break;
           case 'a':
-            return player.direction !== 'right' ? { ...player, direction: 'left' } : player;
+            if (player.direction !== 'right') { lastTurnTimeRef.current[1] = now; return { ...player, direction: 'left' }; }
+            break;
           case 'd':
-            return player.direction !== 'left' ? { ...player, direction: 'right' } : player;
+            if (player.direction !== 'left') { lastTurnTimeRef.current[1] = now; return { ...player, direction: 'right' }; }
+            break;
         }
       }
       if (player.id === 2) {
+        if (now - lastTurnTimeRef.current[2] < TURN_DELAY) return player;
         switch (event.key) {
           case 'ArrowUp':
-            return player.direction !== 'down' ? { ...player, direction: 'up' } : player;
+            if (player.direction !== 'down') { lastTurnTimeRef.current[2] = now; return { ...player, direction: 'up' }; }
+            break;
           case 'ArrowDown':
-            return player.direction !== 'up' ? { ...player, direction: 'down' } : player;
+            if (player.direction !== 'up') { lastTurnTimeRef.current[2] = now; return { ...player, direction: 'down' }; }
+            break;
           case 'ArrowLeft':
-            return player.direction !== 'right' ? { ...player, direction: 'left' } : player;
+            if (player.direction !== 'right') { lastTurnTimeRef.current[2] = now; return { ...player, direction: 'left' }; }
+            break;
           case 'ArrowRight':
-            return player.direction !== 'left' ? { ...player, direction: 'right' } : player;
+            if (player.direction !== 'left') { lastTurnTimeRef.current[2] = now; return { ...player, direction: 'right' }; }
+            break;
         }
       }
       return player;
@@ -224,6 +238,7 @@ const Game: React.FC = () => {
       }
     ]);
     lastMoveTimeRef.current = 0;
+    lastTurnTimeRef.current = { 1: 0, 2: 0 };
   };
 
   useEffect(() => {
