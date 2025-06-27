@@ -22,9 +22,9 @@ const TRAIL_HIT_DISTANCE = 0.2; // tighter trail hitbox
 const REGEN_DELAY_FRAMES = 60; // start regenerating after ~1s
 const DAMAGE_RATE = 0.8; // health lost per frame while pushing into a wall
 
-const TRAIL_START_HEIGHT = 0.2; // height near the bike
-const TRAIL_END_HEIGHT = 0.5;   // final wall height
-const TAPER_DISTANCE = 1;       // distance over which to reach full height
+const TRAIL_WIDTH = 0.05; // consistent trail thickness
+const TRAIL_HEIGHT = 0.5; // shorter trail wall
+const TRAIL_MAX_FRAMES = 100 * 60; // trail lasts about 100 seconds
 
 const Game3D: React.FC = () => {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -33,11 +33,11 @@ const Game3D: React.FC = () => {
   const cameraRef = useRef<THREE.PerspectiveCamera>();
   const bikeRef = useRef<THREE.Mesh>();
   const trailMeshesRef = useRef<THREE.Mesh[]>([]);
+  const trailFramesRef = useRef<number[]>([]);
   const animationIdRef = useRef<number>();
   const frameCountRef = useRef<number>(0);
   const cameraRotationRef = useRef<number>(0);
   const lastHitFrameRef = useRef<number>(0);
-  const distanceSinceTurnRef = useRef<number>(0);
   
   const [gameState, setGameState] = useState<'waiting' | 'playing' | 'gameOver'>('waiting');
   const [bikeHealth, setBikeHealth] = useState(100);
@@ -63,7 +63,7 @@ const Game3D: React.FC = () => {
 
     // Scene setup
     const scene = new THREE.Scene();
-    scene.fog = new THREE.Fog(0x000000, 30, 150);
+    scene.fog = new THREE.Fog(0x0a0a0a, 40, 180);
     sceneRef.current = scene;
 
     // Camera setup - third person following camera
@@ -77,26 +77,26 @@ const Game3D: React.FC = () => {
     cameraRef.current = camera;
 
     // Renderer setup
-    const renderer = new THREE.WebGLRenderer({ antialias: false });
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setClearColor(0x000000);
+    renderer.setClearColor(0x0a0a0a);
     renderer.shadowMap.enabled = false;
     mountRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
     // Grid floor - more subtle and modern
     const gridSize = 200;
-    const gridDivisions = 50;
-    const gridHelper = new THREE.GridHelper(gridSize, gridDivisions, 0x111111, 0x0a0a0a);
+    const gridDivisions = 40;
+    const gridHelper = new THREE.GridHelper(gridSize, gridDivisions, 0x1a1a1a, 0x151515);
     gridHelper.position.y = -0.5;
     scene.add(gridHelper);
 
     // Bike geometry - sleeker, more modern design
     const bikeGeometry = new THREE.BoxGeometry(0.3, 0.2, 0.8);
     const bikeMaterial = new THREE.MeshBasicMaterial({ 
-      color: 0x00ff88,
+      color: 0x4a9eff,
       transparent: true,
-      opacity: 0.95
+      opacity: 0.85
     });
     const bikeMesh = new THREE.Mesh(bikeGeometry, bikeMaterial);
     bikeMesh.position.set(0, 0, 0);
@@ -117,8 +117,8 @@ const Game3D: React.FC = () => {
     const boundarySize = 45;
     
     const wallMaterial = new THREE.MeshBasicMaterial({ 
-      color: 0x666666, 
-      opacity: 0.3, 
+      color: 0x2a2a2a, 
+      opacity: 0.2, 
       transparent: true 
     });
     
@@ -139,7 +139,7 @@ const Game3D: React.FC = () => {
 
   }, []);
 
-  const createTrailSegment = useCallback((start: THREE.Vector3, end: THREE.Vector3, startDistance: number) => {
+  const createTrailSegment = useCallback((start: THREE.Vector3, end: THREE.Vector3) => {
     if (!sceneRef.current) return;
 
     const direction = new THREE.Vector3().subVectors(end, start);
@@ -147,25 +147,17 @@ const Game3D: React.FC = () => {
 
     if (length < 0.1) return;
 
-    const geometry = new THREE.BoxGeometry(0.02, TRAIL_END_HEIGHT, length, 1, 1, 1);
-
-    // Taper only within the first meter after a turn
-    const posAttr = geometry.attributes.position as THREE.BufferAttribute;
-    for (let i = 0; i < posAttr.count; i++) {
-      const z = posAttr.getZ(i); // -length/2 to length/2
-      const t = (z + length / 2) / length; // 0 at start, 1 at end
-      const dist = startDistance + t * length;
-      const progress = Math.min(dist / TAPER_DISTANCE, 1);
-      const height = THREE.MathUtils.lerp(TRAIL_START_HEIGHT, TRAIL_END_HEIGHT, progress);
-      const scale = height / TRAIL_END_HEIGHT;
-      posAttr.setY(i, posAttr.getY(i) * scale);
-    }
-    posAttr.needsUpdate = true;
+    // Extend slightly so segments overlap at corners
+    const extension = TRAIL_WIDTH;
+    const geometryLength = length + extension * 2;
+    const geometry = new THREE.BoxGeometry(TRAIL_WIDTH, TRAIL_HEIGHT, geometryLength);
 
     const material = new THREE.MeshBasicMaterial({
-      color: 0x00ffff,
+      color: 0x3a7bd5,
       transparent: true,
-      opacity: 0.6
+      opacity: 0.4,
+      depthWrite: true,
+      side: THREE.DoubleSide
     });
 
     const trailMesh = new THREE.Mesh(geometry, material);
@@ -179,38 +171,91 @@ const Game3D: React.FC = () => {
     trailMeshesRef.current.push(trailMesh);
   }, []);
 
-  const checkCollisions = useCallback((position: THREE.Vector3, trail: THREE.Vector3[]): { hit: boolean; normal: THREE.Vector3 | null } => {
-    // Check boundary collisions with very small tolerance
-    const bikeHalfWidth = 0.15;
-    if (Math.abs(position.x) + bikeHalfWidth > BOUNDARY_LIMIT) {
-      return { hit: true, normal: new THREE.Vector3(Math.sign(position.x), 0, 0) };
-    }
-    if (Math.abs(position.z) + bikeHalfWidth > BOUNDARY_LIMIT) {
-      return { hit: true, normal: new THREE.Vector3(0, 0, Math.sign(position.z)) };
-    }
+  const checkCollisions = useCallback(
+    (
+      position: THREE.Vector3,
+      trail: THREE.Vector3[]
+    ): { hit: boolean; normal: THREE.Vector3 | null; corrected: THREE.Vector3 } => {
+      const bikeHalfWidth = 0.15;
+      const safetyMargin = 0.02; // Extra margin to prevent phasing
 
-    // Check trail collisions with precise hitbox
-    if (trail.length > 2) {
-      for (let i = 0; i < trail.length - 2; i++) {
-        const start = trail[i];
-        const end = trail[i + 1];
-        const segDir = new THREE.Vector3().subVectors(end, start);
-        const segLength = segDir.length();
-        if (segLength === 0) continue;
-        const segNorm = segDir.clone().normalize();
-        const toPoint = new THREE.Vector3().subVectors(position, start);
-        const proj = THREE.MathUtils.clamp(toPoint.dot(segNorm), 0, segLength);
-        const closest = start.clone().add(segNorm.multiplyScalar(proj));
-        const dist = closest.distanceTo(position);
-        if (dist < TRAIL_HIT_DISTANCE) {
-          const normal = position.clone().sub(closest).normalize();
-          return { hit: true, normal };
+      let hit = false;
+      let normal: THREE.Vector3 | null = null;
+      let correctedX = position.x;
+      let correctedZ = position.z;
+
+      // Check boundary collisions
+      const limit = BOUNDARY_LIMIT - bikeHalfWidth;
+      
+      if (Math.abs(position.x) > limit) {
+        hit = true;
+        correctedX = Math.sign(position.x) * limit;
+        normal = new THREE.Vector3(-Math.sign(position.x), 0, 0);
+      }
+      
+      if (Math.abs(position.z) > limit) {
+        hit = true;
+        correctedZ = Math.sign(position.z) * limit;
+        normal = new THREE.Vector3(0, 0, -Math.sign(position.z));
+      }
+
+      // Check trail collisions - line segments not points
+      if (trail.length > 10) {  // Skip recent trail segments
+        for (let i = 0; i < trail.length - 8; i++) {
+          const start = trail[i];
+          const end = trail[i + 1];
+          
+          // Skip if we're checking against ourselves
+          if (i === trail.length - 1) continue;
+          
+          // Get the direction vector of the segment
+          const segDir = new THREE.Vector3().subVectors(end, start);
+          const segLength = segDir.length();
+          
+          if (segLength < 0.01) continue; // Skip zero-length segments
+          
+          segDir.normalize();
+          
+          // Project bike position onto the line segment
+          const toStart = new THREE.Vector3().subVectors(position, start);
+          const projLength = THREE.MathUtils.clamp(toStart.dot(segDir), 0, segLength);
+          
+          // Find closest point on segment
+          const closestPoint = start.clone().add(segDir.clone().multiplyScalar(projLength));
+          
+          // Check distance to segment
+          const dist = position.distanceTo(closestPoint);
+          const collisionDist = bikeHalfWidth + TRAIL_WIDTH/2 + safetyMargin;
+          
+          if (dist < collisionDist) {
+            hit = true;
+            
+            // Calculate push-out direction
+            const pushDir = new THREE.Vector3().subVectors(position, closestPoint);
+            if (pushDir.length() > 0.001) {
+              pushDir.normalize();
+              
+              // Push the bike out to safe distance with extra margin
+              const safePoint = closestPoint.clone().add(pushDir.multiplyScalar(collisionDist + 0.01));
+              
+              // Only update if this collision pushes us further out
+              const currentDist = new THREE.Vector2(correctedX, correctedZ).distanceTo(new THREE.Vector2(position.x, position.z));
+              const newDist = new THREE.Vector2(safePoint.x, safePoint.z).distanceTo(new THREE.Vector2(position.x, position.z));
+              
+              if (newDist > currentDist) {
+                correctedX = safePoint.x;
+                correctedZ = safePoint.z;
+                normal = pushDir;
+              }
+            }
+          }
         }
       }
-    }
 
-    return { hit: false, normal: null };
-  }, []);
+      return { hit, normal, corrected: new THREE.Vector3(correctedX, position.y, correctedZ) };
+    },
+    []
+  );
 
   const updateBike = useCallback(() => {
     if (gameState !== 'playing') return;
@@ -222,20 +267,29 @@ const Game3D: React.FC = () => {
 
     let newRotation = bike.rotation;
     let newLastTurnFrame = bike.lastTurnFrame;
+    const newTrail = [...bike.trail];
+    const newTrailFrames = [...trailFramesRef.current];
     
     // Simple delay to keep consecutive turns slightly apart
     const framesSinceLastTurn = frameCountRef.current - bike.lastTurnFrame;
     const canTurn = framesSinceLastTurn >= TURN_DELAY_FRAMES;
     
     if (canTurn && turnQueueRef.current.length > 0) {
+      if (newTrail.length > 0) {
+        const lastPoint = newTrail[newTrail.length - 1];
+        createTrailSegment(lastPoint, bike.position.clone());
+      }
+      newTrail.push(bike.position.clone());
+      newTrailFrames.push(frameCountRef.current);
+
       const turn = turnQueueRef.current.shift();
       if (turn === 'left') {
         newRotation += Math.PI / 2;
       } else if (turn === 'right') {
         newRotation -= Math.PI / 2;
       }
+
       newLastTurnFrame = frameCountRef.current;
-      distanceSinceTurnRef.current = 0;
     }
 
     // Move forward based on current rotation
@@ -253,38 +307,24 @@ const Game3D: React.FC = () => {
     let newGrindOffset = bike.grindOffset;
     let newGrindNormal = bike.grindNormal;
 
-    const collision = checkCollisions(potentialPosition, bike.trail);
-    if (collision.hit) {
-      // Start from the attempted position and clamp against the wall so
-      // motion parallel to the surface is preserved
-      newPosition.copy(potentialPosition);
-      if (collision.normal) {
-        if (Math.abs(newPosition.x) + 0.15 > BOUNDARY_LIMIT && collision.normal.x !== 0) {
-          newPosition.x = Math.sign(newPosition.x) * (BOUNDARY_LIMIT - 0.15);
-        }
-        if (Math.abs(newPosition.z) + 0.15 > BOUNDARY_LIMIT && collision.normal.z !== 0) {
-          newPosition.z = Math.sign(newPosition.z) * (BOUNDARY_LIMIT - 0.15);
-        }
-        newGrindNormal = collision.normal.clone();
-        const push = direction.dot(newGrindNormal);
-        if (push > 0) {
-          newGrindOffset = Math.min(bike.grindOffset + 0.02, 0.3);
-          currentHealth = Math.max(0, bike.health - DAMAGE_RATE);
-          setBikeHealth(currentHealth);
-          lastHitFrameRef.current = frameCountRef.current;
-        } else if (newGrindOffset > 0) {
-          newGrindOffset = Math.max(0, newGrindOffset - 0.02);
-        }
-        newPosition.add(newGrindNormal.clone().multiplyScalar(-newGrindOffset));
-      } else {
-        // Unknown normal - just stay put and take damage
-        newPosition.copy(bike.position);
+    const collision = checkCollisions(
+      potentialPosition,
+      [...newTrail, potentialPosition]
+    );
+    newPosition.copy(collision.corrected);
+    if (collision.hit && collision.normal) {
+      newGrindNormal = collision.normal.clone();
+      const push = direction.dot(newGrindNormal);
+      if (push > 0) {
+        newGrindOffset = Math.min(bike.grindOffset + 0.02, 0.3);
         currentHealth = Math.max(0, bike.health - DAMAGE_RATE);
         setBikeHealth(currentHealth);
         lastHitFrameRef.current = frameCountRef.current;
+      } else if (newGrindOffset > 0) {
+        newGrindOffset = Math.max(0, newGrindOffset - 0.02);
       }
+      newPosition.add(newGrindNormal.clone().multiplyScalar(-newGrindOffset));
     } else {
-      // Not colliding
       newGrindNormal = null;
       newGrindOffset = 0;
     }
@@ -308,13 +348,24 @@ const Game3D: React.FC = () => {
     }
 
     // Add to trail every certain distance
-    const newTrail = [...bike.trail];
     if (newTrail.length === 0 || newPosition.distanceTo(newTrail[newTrail.length - 1]) > 0.5) {
       if (newTrail.length > 0) {
-        createTrailSegment(newTrail[newTrail.length - 1], newPosition, distanceSinceTurnRef.current);
-        distanceSinceTurnRef.current += newPosition.distanceTo(newTrail[newTrail.length - 1]);
+        createTrailSegment(newTrail[newTrail.length - 1], newPosition);
       }
       newTrail.push(newPosition.clone());
+      newTrailFrames.push(frameCountRef.current);
+    }
+
+    // Trim old trail segments so trail length stays within limit
+    while (newTrailFrames.length > 0 && frameCountRef.current - newTrailFrames[0] > TRAIL_MAX_FRAMES) {
+      newTrailFrames.shift();
+      if (newTrail.length > 0) {
+        newTrail.shift();
+      }
+      const oldMesh = trailMeshesRef.current.shift();
+      if (oldMesh && sceneRef.current) {
+        sceneRef.current.remove(oldMesh);
+      }
     }
 
     // Update the bike state ref
@@ -330,6 +381,7 @@ const Game3D: React.FC = () => {
       grindNormal: newGrindNormal,
       alive: currentHealth > 0
     };
+    trailFramesRef.current = newTrailFrames;
   }, [gameState, checkCollisions, createTrailSegment]);
 
   const updateCamera = useCallback(() => {
@@ -354,7 +406,7 @@ const Game3D: React.FC = () => {
     }
     
     // VERY slow rotation following (0.02 = 2% per frame)
-    cameraRotationRef.current += adjustedDiff * 0.04;
+    cameraRotationRef.current += adjustedDiff * 0.025;
     
     // Calculate camera position behind the bike based on smoothed rotation
     const cameraOffset = new THREE.Vector3(
@@ -366,7 +418,7 @@ const Game3D: React.FC = () => {
     const targetCameraPosition = bike.position.clone().add(cameraOffset);
     
     // Smooth camera position movement
-    camera.position.lerp(targetCameraPosition, 0.06);
+    camera.position.lerp(targetCameraPosition, 0.04);
     
     // Look at the bike
     camera.lookAt(bike.position);
@@ -437,6 +489,7 @@ const Game3D: React.FC = () => {
       grindOffset: 0,
       grindNormal: null
     };
+    trailFramesRef.current = [0];
 
     // Reset bike mesh position
     if (bikeRef.current) {
@@ -449,7 +502,6 @@ const Game3D: React.FC = () => {
     frameCountRef.current = 0;
     cameraRotationRef.current = 0;
     lastHitFrameRef.current = 0;
-    distanceSinceTurnRef.current = 0;
 
     setBikeHealth(100);
     setGameState('playing');
@@ -505,8 +557,8 @@ const Game3D: React.FC = () => {
       
       {/* UI Overlay */}
       <div className="absolute top-4 left-4 text-white z-10">
-        <h1 className="text-2xl font-bold text-green-400 mb-2">3D TRON BIKE</h1>
-        <div className="text-sm text-gray-400">
+        <h1 className="text-2xl font-bold text-blue-400 mb-2">3D TRON BIKE</h1>
+        <div className="text-sm text-gray-300">
           <p>Z/← Turn Left | X/→ Turn Right</p>
           <p>Avoid walls and your own trail!</p>
         </div>
@@ -515,12 +567,13 @@ const Game3D: React.FC = () => {
       {/* Health Bar */}
       {gameState === 'playing' && (
         <div className="absolute top-4 right-4 z-10">
-          <div className="w-64 h-6 bg-gray-800 rounded-full overflow-hidden border border-gray-600">
+          <div className="w-64 h-6 bg-gray-900 rounded-full overflow-hidden border border-gray-700">
             <div
               className="h-full transition-all duration-200"
               style={{
                 width: `${bikeHealth}%`,
-                backgroundColor: `hsl(${(bikeHealth / 100) * 120}, 100%, 50%)`
+                backgroundColor: bikeHealth > 60 ? '#3a7bd5' : bikeHealth > 30 ? '#f39c12' : '#e74c3c',
+                boxShadow: 'inset 0 0 10px rgba(0,0,0,0.3)'
               }}
             />
           </div>
@@ -533,11 +586,11 @@ const Game3D: React.FC = () => {
       {gameState === 'waiting' && (
         <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-80 z-20">
           <div className="text-center text-white">
-            <h2 className="text-3xl font-bold mb-4 text-green-400">READY TO RACE?</h2>
+            <h2 className="text-3xl font-bold mb-4 text-blue-400">READY TO RACE?</h2>
             <p className="mb-6 text-gray-300">Navigate the 3D grid. Make 90° turns only.</p>
             <button
               onClick={startGame}
-              className="px-8 py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded transition-colors"
+              className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded transition-colors"
             >
               START GAME
             </button>
