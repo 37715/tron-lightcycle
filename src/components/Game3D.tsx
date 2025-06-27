@@ -15,7 +15,7 @@ interface BikeState {
 }
 
 // Tunable gameplay constants
-const BIKE_SPEED = 0.08; // slightly slower default speed
+const BIKE_SPEED = 0.1; // moderate default speed
 const TURN_DELAY_FRAMES = 20; // minimum frames between consecutive turns
 const BOUNDARY_LIMIT = 44.975; // nearly flush with the wall
 const TRAIL_HIT_DISTANCE = 0.2; // tighter trail hitbox
@@ -180,12 +180,13 @@ const Game3D: React.FC = () => {
   }, []);
 
   const checkCollisions = useCallback((position: THREE.Vector3, trail: THREE.Vector3[]): { hit: boolean; normal: THREE.Vector3 | null } => {
-    // Check boundary collisions with very small tolerance
     const bikeHalfWidth = 0.15;
-    if (Math.abs(position.x) + bikeHalfWidth > BOUNDARY_LIMIT) {
+    const limit = BOUNDARY_LIMIT - 0.001;
+    // Treat being exactly at the boundary as a hit so grinding remains stable
+    if (Math.abs(position.x) + bikeHalfWidth >= limit) {
       return { hit: true, normal: new THREE.Vector3(Math.sign(position.x), 0, 0) };
     }
-    if (Math.abs(position.z) + bikeHalfWidth > BOUNDARY_LIMIT) {
+    if (Math.abs(position.z) + bikeHalfWidth >= limit) {
       return { hit: true, normal: new THREE.Vector3(0, 0, Math.sign(position.z)) };
     }
 
@@ -245,48 +246,34 @@ const Game3D: React.FC = () => {
       Math.cos(newRotation)
     );
     
-    const potentialPosition = bike.position.clone().add(direction.multiplyScalar(bike.speed));
+    const delta = direction.clone().multiplyScalar(bike.speed);
+    let newPosition = bike.position.clone().add(delta);
 
-    // Check collisions BEFORE moving
+    // Collision handling and grinding logic
     let currentHealth = bike.health;
-    let newPosition = potentialPosition.clone();
     let newGrindOffset = bike.grindOffset;
     let newGrindNormal = bike.grindNormal;
 
-    const collision = checkCollisions(potentialPosition, bike.trail);
-    if (collision.hit) {
-      // Start from the attempted position and clamp against the wall so
-      // motion parallel to the surface is preserved
-      newPosition.copy(potentialPosition);
-      if (collision.normal) {
-        if (Math.abs(newPosition.x) + 0.15 > BOUNDARY_LIMIT && collision.normal.x !== 0) {
-          newPosition.x = Math.sign(newPosition.x) * (BOUNDARY_LIMIT - 0.15);
-        }
-        if (Math.abs(newPosition.z) + 0.15 > BOUNDARY_LIMIT && collision.normal.z !== 0) {
-          newPosition.z = Math.sign(newPosition.z) * (BOUNDARY_LIMIT - 0.15);
-        }
-        newGrindNormal = collision.normal.clone();
-        const push = direction.dot(newGrindNormal);
-        if (push > 0) {
-          newGrindOffset = Math.min(bike.grindOffset + 0.02, 0.3);
-          currentHealth = Math.max(0, bike.health - DAMAGE_RATE);
-          setBikeHealth(currentHealth);
-          lastHitFrameRef.current = frameCountRef.current;
-        } else if (newGrindOffset > 0) {
-          newGrindOffset = Math.max(0, newGrindOffset - 0.02);
-        }
-        newPosition.add(newGrindNormal.clone().multiplyScalar(-newGrindOffset));
-      } else {
-        // Unknown normal - just stay put and take damage
-        newPosition.copy(bike.position);
+    const collision = checkCollisions(newPosition, bike.trail);
+    if (collision.hit && collision.normal) {
+      const push = delta.dot(collision.normal);
+      if (push > 0) {
+        // Slide along the surface and accumulate grind offset
+        newPosition.addScaledVector(collision.normal, -push);
+        newGrindOffset = Math.min(bike.grindOffset + push, 0.3);
         currentHealth = Math.max(0, bike.health - DAMAGE_RATE);
         setBikeHealth(currentHealth);
         lastHitFrameRef.current = frameCountRef.current;
       }
-    } else {
-      // Not colliding
-      newGrindNormal = null;
-      newGrindOffset = 0;
+      newGrindNormal = collision.normal.clone();
+    } else if (bike.grindNormal) {
+      // Maintain previous grind state when staying close to the wall
+      const nearX = Math.abs(newPosition.x) + 0.15 >= BOUNDARY_LIMIT - 0.05;
+      const nearZ = Math.abs(newPosition.z) + 0.15 >= BOUNDARY_LIMIT - 0.05;
+      if (!(nearX || nearZ)) {
+        newGrindNormal = null;
+        newGrindOffset = 0;
+      }
     }
 
     // Regenerate health if enough time passed since last hit
@@ -294,17 +281,6 @@ const Game3D: React.FC = () => {
     if (framesSinceHit > REGEN_DELAY_FRAMES && currentHealth < bike.maxHealth) {
       currentHealth = Math.min(bike.maxHealth, currentHealth + 0.5);
       setBikeHealth(currentHealth);
-    }
-
-    // Recover grind offset gradually when not pressing into a wall
-    if (!collision.hit && newGrindOffset > 0) {
-      newGrindOffset = Math.max(0, newGrindOffset - 0.02);
-      if (newGrindNormal) {
-        newPosition.add(newGrindNormal.clone().multiplyScalar(-newGrindOffset));
-      }
-      if (newGrindOffset === 0) {
-        newGrindNormal = null;
-      }
     }
 
     // Add to trail every certain distance
