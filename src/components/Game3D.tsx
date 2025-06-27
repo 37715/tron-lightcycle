@@ -38,7 +38,11 @@ const Game3D: React.FC = () => {
     maxHealth: 100
   });
 
-  const keysPressed = useRef<Set<string>>(new Set());
+  // Queue of requested turns to ensure inputs are never dropped
+  const turnQueueRef = useRef<Array<'left' | 'right'>>([]);
+
+  // Minimal frames required between turns for smoother control
+  const TURN_COOLDOWN_FRAMES = 5;
 
   const initScene = useCallback(() => {
     if (!mountRef.current) return;
@@ -180,29 +184,18 @@ const Game3D: React.FC = () => {
     let newRotation = bike.rotation;
     let newLastTurnFrame = bike.lastTurnFrame;
     
-    // Fixed turn delay - 15 frames between ANY turns for consistency
+    // Ensure turns happen smoothly with a short cooldown
     const framesSinceLastTurn = frameCountRef.current - bike.lastTurnFrame;
-    const canTurn = framesSinceLastTurn >= 15;
-    
-    if (canTurn) {
-      // Check for left turn
-      if (keysPressed.current.has('z') || keysPressed.current.has('arrowleft')) {
-        console.log('Turning left!');
+    const canTurn = framesSinceLastTurn >= TURN_COOLDOWN_FRAMES;
+
+    if (canTurn && turnQueueRef.current.length > 0) {
+      const nextTurn = turnQueueRef.current.shift();
+      if (nextTurn === 'left') {
         newRotation += Math.PI / 2;
-        newLastTurnFrame = frameCountRef.current;
-        // Clear ONLY the keys that were used for this turn
-        keysPressed.current.delete('z');
-        keysPressed.current.delete('arrowleft');
-      } 
-      // Check for right turn
-      else if (keysPressed.current.has('x') || keysPressed.current.has('arrowright')) {
-        console.log('Turning right!');
+      } else if (nextTurn === 'right') {
         newRotation -= Math.PI / 2;
-        newLastTurnFrame = frameCountRef.current;
-        // Clear ONLY the keys that were used for this turn
-        keysPressed.current.delete('x');
-        keysPressed.current.delete('arrowright');
       }
+      newLastTurnFrame = frameCountRef.current;
     }
 
     // Move forward based on current rotation
@@ -321,18 +314,19 @@ const Game3D: React.FC = () => {
 
   const handleKeyDown = useCallback((event: KeyboardEvent) => {
     const key = event.key.toLowerCase();
-    console.log('Key down:', key);
-    
-    if (key === 'z' || key === 'arrowleft' || key === 'x' || key === 'arrowright') {
-      keysPressed.current.add(key);
+
+    if ((key === 'z' || key === 'arrowleft') && !event.repeat) {
+      turnQueueRef.current.push('left');
+      event.preventDefault();
+    }
+    if ((key === 'x' || key === 'arrowright') && !event.repeat) {
+      turnQueueRef.current.push('right');
       event.preventDefault();
     }
   }, []);
 
-  const handleKeyUp = useCallback((event: KeyboardEvent) => {
-    const key = event.key.toLowerCase();
-    console.log('Key up:', key);
-    keysPressed.current.delete(key);
+  const handleKeyUp = useCallback((_event: KeyboardEvent) => {
+    // No action needed on key up with queued turns
   }, []);
 
   const startGame = useCallback(() => {
@@ -363,8 +357,8 @@ const Game3D: React.FC = () => {
       bikeRef.current.rotation.y = 0;
     }
 
-    // Clear any pressed keys
-    keysPressed.current.clear();
+    // Clear queued turns
+    turnQueueRef.current = [];
     frameCountRef.current = 0;
     cameraRotationRef.current = 0;
 
