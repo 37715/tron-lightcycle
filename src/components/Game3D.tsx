@@ -15,7 +15,7 @@ interface BikeState {
 }
 
 // Tunable gameplay constants
-const BIKE_SPEED = 0.07; // tuned for easier control
+const BIKE_SPEED = 0.06; // slightly slower for smoother handling
 const TURN_DELAY_FRAMES = 25; // force wider spacing between double turns
 const BOUNDARY_LIMIT = 44.975; // nearly flush with the wall
 const TRAIL_HIT_DISTANCE = 0.2; // tighter trail hitbox
