@@ -272,11 +272,11 @@ const Game3D: React.FC = () => {
     let newLastTurnFrame = bike.lastTurnFrame;
     const newTrail = [...bike.trail];
     const newTrailFrames = [...trailFramesRef.current];
-    
+
     // Simple delay to keep consecutive turns slightly apart
     const framesSinceLastTurn = frameCountRef.current - bike.lastTurnFrame;
     const canTurn = framesSinceLastTurn >= TURN_DELAY_FRAMES;
-    
+
     if (canTurn && turnQueueRef.current.length > 0) {
       if (newTrail.length > 0) {
         const lastPoint = newTrail[newTrail.length - 1];
@@ -291,6 +291,10 @@ const Game3D: React.FC = () => {
       } else if (turn === 'right') {
         newRotation -= Math.PI / 2;
       }
+
+      // Snap rotation to exact 90-degree increments to avoid drift
+      const quarter = Math.PI / 2;
+      newRotation = Math.round(newRotation / quarter) * quarter;
 
       newLastTurnFrame = frameCountRef.current;
     }
@@ -492,7 +496,6 @@ const Game3D: React.FC = () => {
       grindOffset: 0,
       grindNormal: null
     };
-    trailFramesRef.current = [0];
 
     // Reset bike mesh position
     if (bikeRef.current) {
@@ -505,6 +508,7 @@ const Game3D: React.FC = () => {
     frameCountRef.current = 0;
     cameraRotationRef.current = 0;
     lastHitFrameRef.current = 0;
+    trailFramesRef.current = [0];
 
     setBikeHealth(100);
     setGameState('playing');
