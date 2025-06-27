@@ -208,8 +208,8 @@ const Game3D: React.FC = () => {
 
       // Trail collisions (segments are axis aligned)
       const EPS = 1e-6;
-      if (trail.length > 2) {
-        for (let i = 0; i < trail.length - 2; i++) {
+      if (trail.length > 1) {
+        for (let i = 0; i < trail.length - 1; i++) {
           const start = trail[i];
           const end = trail[i + 1];
 
@@ -288,7 +288,10 @@ const Game3D: React.FC = () => {
     let newGrindOffset = bike.grindOffset;
     let newGrindNormal = bike.grindNormal;
 
-    const collision = checkCollisions(potentialPosition, newTrail);
+    const collision = checkCollisions(
+      potentialPosition,
+      [...newTrail, potentialPosition]
+    );
     newPosition.copy(collision.corrected);
     if (collision.hit && collision.normal) {
       newGrindNormal = collision.normal.clone();
