@@ -183,7 +183,8 @@ const Game3D: React.FC = () => {
       let normal: THREE.Vector3 | null = null;
       let maxPen = 0;
 
-      let corrected = position.clone();
+      let correctedX: { val: number; pen: number; dir: number } | null = null;
+      let correctedZ: { val: number; pen: number; dir: number } | null = null;
 
       const register = (
         axis: 'x' | 'z',
@@ -191,13 +192,20 @@ const Game3D: React.FC = () => {
         dir: number,
         penetration: number
       ) => {
+        hit = true;
+        if (axis === 'x') {
+          if (!correctedX || penetration > correctedX.pen) {
+            correctedX = { val: value, pen: penetration, dir };
+          }
+        } else {
+          if (!correctedZ || penetration > correctedZ.pen) {
+            correctedZ = { val: value, pen: penetration, dir };
+          }
+        }
         if (penetration > maxPen) {
           normal = axis === 'x' ? new THREE.Vector3(dir, 0, 0) : new THREE.Vector3(0, 0, dir);
           maxPen = penetration;
         }
-        if (axis === 'x') corrected.x = value;
-        else corrected.z = value;
-        hit = true;
       };
 
       // World boundaries
@@ -254,6 +262,10 @@ const Game3D: React.FC = () => {
           }
         }
       }
+
+      const corrected = position.clone();
+      if (correctedX) corrected.x = correctedX.val;
+      if (correctedZ) corrected.z = correctedZ.val;
 
       return { hit, normal, corrected };
     },
