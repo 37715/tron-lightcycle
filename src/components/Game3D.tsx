@@ -147,13 +147,18 @@ const Game3D: React.FC = () => {
 
     if (length < 0.1) return;
 
-    const geometry = new THREE.BoxGeometry(0.02, TRAIL_END_HEIGHT, length, 1, 1, 1);
+    // Extend slightly so segments overlap at corners
+    const extension = 0.02;
+    const geometryLength = length + extension * 2;
+    const geometry = new THREE.BoxGeometry(0.02, TRAIL_END_HEIGHT, geometryLength, 1, 1, 1);
 
     // Taper only within the first meter after a turn
     const posAttr = geometry.attributes.position as THREE.BufferAttribute;
+    const halfLength = length / 2;
     for (let i = 0; i < posAttr.count; i++) {
-      const z = posAttr.getZ(i); // -length/2 to length/2
-      const t = (z + length / 2) / length; // 0 at start, 1 at end
+      const z = posAttr.getZ(i);
+      const clampedZ = THREE.MathUtils.clamp(z, -halfLength, halfLength);
+      const t = (clampedZ + halfLength) / length;
       const dist = startDistance + t * length;
       const progress = Math.min(dist / TAPER_DISTANCE, 1);
       const height = THREE.MathUtils.lerp(TRAIL_START_HEIGHT, TRAIL_END_HEIGHT, progress);
@@ -253,18 +258,28 @@ const Game3D: React.FC = () => {
 
     let newRotation = bike.rotation;
     let newLastTurnFrame = bike.lastTurnFrame;
+    const newTrail = [...bike.trail];
     
     // Simple delay to keep consecutive turns slightly apart
     const framesSinceLastTurn = frameCountRef.current - bike.lastTurnFrame;
     const canTurn = framesSinceLastTurn >= TURN_DELAY_FRAMES;
     
     if (canTurn && turnQueueRef.current.length > 0) {
+      if (newTrail.length > 0) {
+        const lastPoint = newTrail[newTrail.length - 1];
+        createTrailSegment(lastPoint, bike.position.clone(), distanceSinceTurnRef.current);
+        newTrail.push(bike.position.clone());
+      } else {
+        newTrail.push(bike.position.clone());
+      }
+
       const turn = turnQueueRef.current.shift();
       if (turn === 'left') {
         newRotation += Math.PI / 2;
       } else if (turn === 'right') {
         newRotation -= Math.PI / 2;
       }
+
       newLastTurnFrame = frameCountRef.current;
       distanceSinceTurnRef.current = 0;
     }
@@ -284,7 +299,7 @@ const Game3D: React.FC = () => {
     let newGrindOffset = bike.grindOffset;
     let newGrindNormal = bike.grindNormal;
 
-    const collision = checkCollisions(potentialPosition, bike.trail);
+    const collision = checkCollisions(potentialPosition, newTrail);
     newPosition.copy(collision.corrected);
     if (collision.hit && collision.normal) {
       newGrindNormal = collision.normal.clone();
@@ -322,7 +337,6 @@ const Game3D: React.FC = () => {
     }
 
     // Add to trail every certain distance
-    const newTrail = [...bike.trail];
     if (newTrail.length === 0 || newPosition.distanceTo(newTrail[newTrail.length - 1]) > 0.5) {
       if (newTrail.length > 0) {
         createTrailSegment(newTrail[newTrail.length - 1], newPosition, distanceSinceTurnRef.current);
