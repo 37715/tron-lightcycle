@@ -148,7 +148,7 @@ const Game3D: React.FC = () => {
     if (length < 0.1) return;
 
     // Extend slightly so segments overlap at corners
-    const extension = 0.1;
+    const extension = TRAIL_WIDTH;
     const geometryLength = length + extension * 2;
     const geometry = new THREE.BoxGeometry(TRAIL_WIDTH, TRAIL_HEIGHT, geometryLength);
 
@@ -179,34 +179,51 @@ const Game3D: React.FC = () => {
       const bikeHalfWidth = 0.15;
 
       let hit = false;
-      let bestPenetration = Infinity;
+      let maxPenetration = 0;
       let normal: THREE.Vector3 | null = null;
-      const corrected = position.clone();
 
-      const testCorrection = (axis: 'x' | 'z', value: number, n: THREE.Vector3) => {
-        const penetration = Math.abs(position[axis] - value);
-        if (penetration < bestPenetration) {
-          bestPenetration = penetration;
-          corrected[axis] = value;
-          normal = n;
-          hit = true;
+      let correctedX = position.x;
+      let correctedZ = position.z;
+
+      const applyCorrection = (
+        axis: 'x' | 'z',
+        value: number,
+        outDir: number,
+        penetration: number
+      ) => {
+        if (penetration > maxPenetration) {
+          normal =
+            axis === 'x'
+              ? new THREE.Vector3(outDir, 0, 0)
+              : new THREE.Vector3(0, 0, outDir);
+          maxPenetration = penetration;
         }
+        if (axis === 'x') {
+          correctedX = value;
+        } else {
+          correctedZ = value;
+        }
+        hit = true;
       };
 
-      // Boundary checks
+      // X boundaries
       if (position.x + bikeHalfWidth > BOUNDARY_LIMIT) {
-        testCorrection('x', BOUNDARY_LIMIT - bikeHalfWidth, new THREE.Vector3(1, 0, 0));
+        applyCorrection(
+          'x',
+          BOUNDARY_LIMIT - bikeHalfWidth,
+          1,
+          position.x + bikeHalfWidth - BOUNDARY_LIMIT
+        );
       } else if (position.x - bikeHalfWidth < -BOUNDARY_LIMIT) {
-        testCorrection('x', -BOUNDARY_LIMIT + bikeHalfWidth, new THREE.Vector3(-1, 0, 0));
+        applyCorrection(
+          'x',
+          -BOUNDARY_LIMIT + bikeHalfWidth,
+          -1,
+          -BOUNDARY_LIMIT - (position.x - bikeHalfWidth)
+        );
       }
 
-      if (position.z + bikeHalfWidth > BOUNDARY_LIMIT) {
-        testCorrection('z', BOUNDARY_LIMIT - bikeHalfWidth, new THREE.Vector3(0, 0, 1));
-      } else if (position.z - bikeHalfWidth < -BOUNDARY_LIMIT) {
-        testCorrection('z', -BOUNDARY_LIMIT + bikeHalfWidth, new THREE.Vector3(0, 0, -1));
-      }
-
-      // Trail collisions (segments are axis aligned)
+      // Trail collisions vertical segments
       const EPS = 1e-6;
       if (trail.length > 1) {
         for (let i = 0; i < trail.length - 1; i++) {
@@ -217,23 +234,66 @@ const Game3D: React.FC = () => {
             const segX = start.x;
             const minZ = Math.min(start.z, end.z) - bikeHalfWidth;
             const maxZ = Math.max(start.z, end.z) + bikeHalfWidth;
-            if (position.z >= minZ && position.z <= maxZ && Math.abs(position.x - segX) < bikeHalfWidth) {
-              const value = segX + Math.sign(position.x - segX) * bikeHalfWidth;
-              testCorrection('x', value, new THREE.Vector3(Math.sign(position.x - segX), 0, 0));
-            }
-          } else if (Math.abs(start.z - end.z) < EPS) {
-            const segZ = start.z;
-            const minX = Math.min(start.x, end.x) - bikeHalfWidth;
-            const maxX = Math.max(start.x, end.x) + bikeHalfWidth;
-            if (position.x >= minX && position.x <= maxX && Math.abs(position.z - segZ) < bikeHalfWidth) {
-              const value = segZ + Math.sign(position.z - segZ) * bikeHalfWidth;
-              testCorrection('z', value, new THREE.Vector3(0, 0, Math.sign(position.z - segZ)));
+            if (
+              position.z >= minZ &&
+              position.z <= maxZ &&
+              position.x + bikeHalfWidth > segX &&
+              position.x - bikeHalfWidth < segX
+            ) {
+              const penetration =
+                position.x < segX
+                  ? position.x + bikeHalfWidth - segX
+                  : segX - (position.x - bikeHalfWidth);
+              applyCorrection('x', segX + Math.sign(segX - position.x) * bikeHalfWidth, Math.sign(segX - position.x), penetration);
             }
           }
         }
       }
 
-      return { hit, normal, corrected };
+      // Z boundaries
+      if (position.z + bikeHalfWidth > BOUNDARY_LIMIT) {
+        applyCorrection(
+          'z',
+          BOUNDARY_LIMIT - bikeHalfWidth,
+          1,
+          position.z + bikeHalfWidth - BOUNDARY_LIMIT
+        );
+      } else if (position.z - bikeHalfWidth < -BOUNDARY_LIMIT) {
+        applyCorrection(
+          'z',
+          -BOUNDARY_LIMIT + bikeHalfWidth,
+          -1,
+          -BOUNDARY_LIMIT - (position.z - bikeHalfWidth)
+        );
+      }
+
+      // Trail collisions horizontal segments
+      if (trail.length > 1) {
+        for (let i = 0; i < trail.length - 1; i++) {
+          const start = trail[i];
+          const end = trail[i + 1];
+
+          if (Math.abs(start.z - end.z) < EPS) {
+            const segZ = start.z;
+            const minX = Math.min(start.x, end.x) - bikeHalfWidth;
+            const maxX = Math.max(start.x, end.x) + bikeHalfWidth;
+            if (
+              correctedX >= minX &&
+              correctedX <= maxX &&
+              position.z + bikeHalfWidth > segZ &&
+              position.z - bikeHalfWidth < segZ
+            ) {
+              const penetration =
+                position.z < segZ
+                  ? position.z + bikeHalfWidth - segZ
+                  : segZ - (position.z - bikeHalfWidth);
+              applyCorrection('z', segZ + Math.sign(segZ - position.z) * bikeHalfWidth, Math.sign(segZ - position.z), penetration);
+            }
+          }
+        }
+      }
+
+      return { hit, normal, corrected: new THREE.Vector3(correctedX, position.y, correctedZ) };
     },
     []
   );
