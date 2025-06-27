@@ -15,7 +15,7 @@ interface BikeState {
 }
 
 // Tunable gameplay constants
-const BIKE_SPEED = 0.08; // slightly slower for easier control
+const BIKE_SPEED = 0.07; // tuned for easier control
 const TURN_DELAY_FRAMES = 25; // force wider spacing between double turns
 const BOUNDARY_LIMIT = 44.975; // nearly flush with the wall
 const TRAIL_HIT_DISTANCE = 0.2; // tighter trail hitbox
@@ -279,13 +279,15 @@ const Game3D: React.FC = () => {
 
     const collision = checkCollisions(newPosition, bike.trail);
     if (collision.hit && collision.normal) {
-      const push = delta.dot(collision.normal);
+      const normal = collision.normal;
+      const push = delta.dot(normal) + collision.penetration;
 
-      // Remove any penetration and prevent moving further inside
-      newPosition.addScaledVector(collision.normal, -(collision.penetration + Math.max(push, 0)));
+      // Slide along the wall and clamp outside
+      const slide = delta.clone().sub(normal.clone().multiplyScalar(push));
+      newPosition = bike.position.clone().add(slide);
 
-      if (push > 0 || collision.penetration > 0) {
-        newGrindOffset = Math.min(bike.grindOffset + push + collision.penetration, 0.3);
+      if (push > 0) {
+        newGrindOffset = Math.min(bike.grindOffset + push, 0.3);
         currentHealth = Math.max(0, bike.health - DAMAGE_RATE);
         setBikeHealth(currentHealth);
         lastHitFrameRef.current = frameCountRef.current;
@@ -293,7 +295,7 @@ const Game3D: React.FC = () => {
         newGrindOffset = Math.max(0, bike.grindOffset - 0.05);
       }
 
-      newGrindNormal = collision.normal.clone();
+      newGrindNormal = normal.clone();
     } else if (bike.grindNormal) {
       // Gradually release from the wall when no longer colliding
       newGrindOffset = Math.max(0, bike.grindOffset - 0.05);
