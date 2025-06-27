@@ -23,8 +23,8 @@ const REGEN_DELAY_FRAMES = 60; // start regenerating after ~1s
 const DAMAGE_RATE = 0.8; // health lost per frame while pushing into a wall
 
 const TRAIL_WIDTH = 0.05; // consistent trail thickness
-const TRAIL_HEIGHT = 1.0; // slightly shorter trail wall
-const TRAIL_MAX_FRAMES = 20 * 60; // trail lasts about 20 seconds
+const TRAIL_HEIGHT = 0.5; // shorter trail wall
+const TRAIL_MAX_FRAMES = 100 * 60; // trail lasts about 100 seconds
 
 const Game3D: React.FC = () => {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -154,9 +154,10 @@ const Game3D: React.FC = () => {
 
     const material = new THREE.MeshBasicMaterial({
       color: 0x00ffff,
-      transparent: true,
-      opacity: 0.6,
-      depthWrite: false
+      transparent: false,
+      opacity: 1,
+      depthWrite: true,
+      side: THREE.DoubleSide
     });
 
     const trailMesh = new THREE.Mesh(geometry, material);
