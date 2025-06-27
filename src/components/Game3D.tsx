@@ -22,9 +22,8 @@ const TRAIL_HIT_DISTANCE = 0.2; // tighter trail hitbox
 const REGEN_DELAY_FRAMES = 60; // start regenerating after ~1s
 const DAMAGE_RATE = 0.8; // health lost per frame while pushing into a wall
 
-const TRAIL_START_HEIGHT = 0.2; // height near the bike
-const TRAIL_END_HEIGHT = 0.5;   // final wall height
-const TAPER_DISTANCE = 1;       // distance over which to reach full height
+const TRAIL_WIDTH = 0.05; // consistent trail thickness
+const TRAIL_HEIGHT = 1.5; // match boundary wall height
 
 const Game3D: React.FC = () => {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -37,7 +36,6 @@ const Game3D: React.FC = () => {
   const frameCountRef = useRef<number>(0);
   const cameraRotationRef = useRef<number>(0);
   const lastHitFrameRef = useRef<number>(0);
-  const distanceSinceTurnRef = useRef<number>(0);
   
   const [gameState, setGameState] = useState<'waiting' | 'playing' | 'gameOver'>('waiting');
   const [bikeHealth, setBikeHealth] = useState(100);
@@ -139,7 +137,7 @@ const Game3D: React.FC = () => {
 
   }, []);
 
-  const createTrailSegment = useCallback((start: THREE.Vector3, end: THREE.Vector3, startDistance: number) => {
+  const createTrailSegment = useCallback((start: THREE.Vector3, end: THREE.Vector3) => {
     if (!sceneRef.current) return;
 
     const direction = new THREE.Vector3().subVectors(end, start);
@@ -148,24 +146,9 @@ const Game3D: React.FC = () => {
     if (length < 0.1) return;
 
     // Extend slightly so segments overlap at corners
-    const extension = 0.02;
+    const extension = 0.05;
     const geometryLength = length + extension * 2;
-    const geometry = new THREE.BoxGeometry(0.02, TRAIL_END_HEIGHT, geometryLength, 1, 1, 1);
-
-    // Taper only within the first meter after a turn
-    const posAttr = geometry.attributes.position as THREE.BufferAttribute;
-    const halfLength = length / 2;
-    for (let i = 0; i < posAttr.count; i++) {
-      const z = posAttr.getZ(i);
-      const clampedZ = THREE.MathUtils.clamp(z, -halfLength, halfLength);
-      const t = (clampedZ + halfLength) / length;
-      const dist = startDistance + t * length;
-      const progress = Math.min(dist / TAPER_DISTANCE, 1);
-      const height = THREE.MathUtils.lerp(TRAIL_START_HEIGHT, TRAIL_END_HEIGHT, progress);
-      const scale = height / TRAIL_END_HEIGHT;
-      posAttr.setY(i, posAttr.getY(i) * scale);
-    }
-    posAttr.needsUpdate = true;
+    const geometry = new THREE.BoxGeometry(TRAIL_WIDTH, TRAIL_HEIGHT, geometryLength);
 
     const material = new THREE.MeshBasicMaterial({
       color: 0x00ffff,
@@ -185,32 +168,38 @@ const Game3D: React.FC = () => {
   }, []);
 
   const checkCollisions = useCallback(
-    (position: THREE.Vector3, trail: THREE.Vector3[]): { hit: boolean; normal: THREE.Vector3 | null; corrected: THREE.Vector3 } => {
+    (
+      position: THREE.Vector3,
+      trail: THREE.Vector3[]
+    ): { hit: boolean; normal: THREE.Vector3 | null; corrected: THREE.Vector3 } => {
       const bikeHalfWidth = 0.15;
 
       let hit = false;
+      let bestPenetration = 0;
       let normal: THREE.Vector3 | null = null;
       const corrected = position.clone();
 
+      const testCorrection = (axis: 'x' | 'z', value: number, n: THREE.Vector3) => {
+        const penetration = Math.abs(position[axis] - value);
+        if (penetration > bestPenetration) {
+          bestPenetration = penetration;
+          corrected[axis] = value;
+          normal = n;
+          hit = true;
+        }
+      };
+
       // Boundary checks
-      if (corrected.x + bikeHalfWidth > BOUNDARY_LIMIT) {
-        corrected.x = BOUNDARY_LIMIT - bikeHalfWidth;
-        hit = true;
-        normal = new THREE.Vector3(1, 0, 0);
-      } else if (corrected.x - bikeHalfWidth < -BOUNDARY_LIMIT) {
-        corrected.x = -BOUNDARY_LIMIT + bikeHalfWidth;
-        hit = true;
-        normal = new THREE.Vector3(-1, 0, 0);
+      if (position.x + bikeHalfWidth > BOUNDARY_LIMIT) {
+        testCorrection('x', BOUNDARY_LIMIT - bikeHalfWidth, new THREE.Vector3(1, 0, 0));
+      } else if (position.x - bikeHalfWidth < -BOUNDARY_LIMIT) {
+        testCorrection('x', -BOUNDARY_LIMIT + bikeHalfWidth, new THREE.Vector3(-1, 0, 0));
       }
 
-      if (corrected.z + bikeHalfWidth > BOUNDARY_LIMIT) {
-        corrected.z = BOUNDARY_LIMIT - bikeHalfWidth;
-        hit = true;
-        normal = new THREE.Vector3(0, 0, 1);
-      } else if (corrected.z - bikeHalfWidth < -BOUNDARY_LIMIT) {
-        corrected.z = -BOUNDARY_LIMIT + bikeHalfWidth;
-        hit = true;
-        normal = new THREE.Vector3(0, 0, -1);
+      if (position.z + bikeHalfWidth > BOUNDARY_LIMIT) {
+        testCorrection('z', BOUNDARY_LIMIT - bikeHalfWidth, new THREE.Vector3(0, 0, 1));
+      } else if (position.z - bikeHalfWidth < -BOUNDARY_LIMIT) {
+        testCorrection('z', -BOUNDARY_LIMIT + bikeHalfWidth, new THREE.Vector3(0, 0, -1));
       }
 
       // Trail collisions (segments are axis aligned)
@@ -223,21 +212,17 @@ const Game3D: React.FC = () => {
             const segX = start.x;
             const minZ = Math.min(start.z, end.z) - bikeHalfWidth;
             const maxZ = Math.max(start.z, end.z) + bikeHalfWidth;
-            if (corrected.z >= minZ && corrected.z <= maxZ && Math.abs(corrected.x - segX) < bikeHalfWidth) {
-              corrected.x = segX + Math.sign(corrected.x - segX) * bikeHalfWidth;
-              hit = true;
-              normal = new THREE.Vector3(Math.sign(corrected.x - segX), 0, 0);
-              break;
+            if (position.z >= minZ && position.z <= maxZ && Math.abs(position.x - segX) < bikeHalfWidth) {
+              const value = segX + Math.sign(position.x - segX) * bikeHalfWidth;
+              testCorrection('x', value, new THREE.Vector3(Math.sign(position.x - segX), 0, 0));
             }
           } else if (start.z === end.z) {
             const segZ = start.z;
             const minX = Math.min(start.x, end.x) - bikeHalfWidth;
             const maxX = Math.max(start.x, end.x) + bikeHalfWidth;
-            if (corrected.x >= minX && corrected.x <= maxX && Math.abs(corrected.z - segZ) < bikeHalfWidth) {
-              corrected.z = segZ + Math.sign(corrected.z - segZ) * bikeHalfWidth;
-              hit = true;
-              normal = new THREE.Vector3(0, 0, Math.sign(corrected.z - segZ));
-              break;
+            if (position.x >= minX && position.x <= maxX && Math.abs(position.z - segZ) < bikeHalfWidth) {
+              const value = segZ + Math.sign(position.z - segZ) * bikeHalfWidth;
+              testCorrection('z', value, new THREE.Vector3(0, 0, Math.sign(position.z - segZ)));
             }
           }
         }
@@ -267,7 +252,7 @@ const Game3D: React.FC = () => {
     if (canTurn && turnQueueRef.current.length > 0) {
       if (newTrail.length > 0) {
         const lastPoint = newTrail[newTrail.length - 1];
-        createTrailSegment(lastPoint, bike.position.clone(), distanceSinceTurnRef.current);
+        createTrailSegment(lastPoint, bike.position.clone());
         newTrail.push(bike.position.clone());
       } else {
         newTrail.push(bike.position.clone());
@@ -281,7 +266,6 @@ const Game3D: React.FC = () => {
       }
 
       newLastTurnFrame = frameCountRef.current;
-      distanceSinceTurnRef.current = 0;
     }
 
     // Move forward based on current rotation
@@ -339,8 +323,7 @@ const Game3D: React.FC = () => {
     // Add to trail every certain distance
     if (newTrail.length === 0 || newPosition.distanceTo(newTrail[newTrail.length - 1]) > 0.5) {
       if (newTrail.length > 0) {
-        createTrailSegment(newTrail[newTrail.length - 1], newPosition, distanceSinceTurnRef.current);
-        distanceSinceTurnRef.current += newPosition.distanceTo(newTrail[newTrail.length - 1]);
+        createTrailSegment(newTrail[newTrail.length - 1], newPosition);
       }
       newTrail.push(newPosition.clone());
     }
@@ -477,7 +460,6 @@ const Game3D: React.FC = () => {
     frameCountRef.current = 0;
     cameraRotationRef.current = 0;
     lastHitFrameRef.current = 0;
-    distanceSinceTurnRef.current = 0;
 
     setBikeHealth(100);
     setGameState('playing');
