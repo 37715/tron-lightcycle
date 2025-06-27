@@ -15,7 +15,7 @@ interface BikeState {
 }
 
 // Tunable gameplay constants
-const BIKE_SPEED = 0.12; // slightly slower default speed
+const BIKE_SPEED = 0.1; // slower default speed for tighter control
 const TURN_DELAY_FRAMES = 20; // minimum frames between consecutive turns
 const BOUNDARY_LIMIT = 44.975; // nearly flush with the wall
 const TRAIL_HIT_DISTANCE = 0.2; // tighter trail hitbox
@@ -138,23 +138,37 @@ const Game3D: React.FC = () => {
 
     const direction = new THREE.Vector3().subVectors(end, start);
     const length = direction.length();
-    
+
     if (length < 0.1) return;
 
-    const geometry = new THREE.BoxGeometry(0.02, 0.8, length);
-    const material = new THREE.MeshBasicMaterial({ 
+    // Trail height gradually increases from bike height to normal wall height
+    const startHeight = 0.2; // roughly bike height
+    const endHeight = 0.6;   // slightly shorter than before
+    const geometry = new THREE.BoxGeometry(0.02, endHeight, length, 1, 1, 1);
+
+    // Taper the start of the segment so it fades up from the bike
+    const posAttr = geometry.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < posAttr.count; i++) {
+      const z = posAttr.getZ(i); // -length/2 to length/2
+      const t = (z + length / 2) / length; // 0 at start, 1 at end
+      const scale = THREE.MathUtils.lerp(startHeight, endHeight, t) / endHeight;
+      posAttr.setY(i, posAttr.getY(i) * scale);
+    }
+    posAttr.needsUpdate = true;
+
+    const material = new THREE.MeshBasicMaterial({
       color: 0x00ffff,
       transparent: true,
       opacity: 0.6
     });
-    
+
     const trailMesh = new THREE.Mesh(geometry, material);
-    
+
     const midpoint = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
     trailMesh.position.copy(midpoint);
-    
+
     trailMesh.lookAt(end);
-    
+
     sceneRef.current.add(trailMesh);
     trailMeshesRef.current.push(trailMesh);
   }, []);
@@ -225,7 +239,8 @@ const Game3D: React.FC = () => {
 
     const collision = checkCollisions(potentialPosition, bike.trail);
     if (collision.hit) {
-      newPosition.copy(potentialPosition);
+      // Revert to current position so we don't move through the wall
+      newPosition.copy(bike.position);
       if (collision.normal) {
         // Clamp position flush against the wall to allow sliding
         if (Math.abs(newPosition.x) + 0.15 > BOUNDARY_LIMIT && collision.normal.x !== 0) {
