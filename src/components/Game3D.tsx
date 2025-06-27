@@ -179,49 +179,69 @@ const Game3D: React.FC = () => {
     trailMeshesRef.current.push(trailMesh);
   }, []);
 
-  const checkCollisions = useCallback((position: THREE.Vector3, trail: THREE.Vector3[]): { hit: boolean; normal: THREE.Vector3 | null; penetration: number } => {
-    // Check boundary collisions with very small tolerance
-    const bikeHalfWidth = 0.15;
-    if (Math.abs(position.x) + bikeHalfWidth > BOUNDARY_LIMIT) {
-      const penetration = Math.abs(position.x) + bikeHalfWidth - BOUNDARY_LIMIT;
-      return {
-        hit: true,
-        normal: new THREE.Vector3(Math.sign(position.x), 0, 0),
-        penetration
-      };
-    }
-    if (Math.abs(position.z) + bikeHalfWidth > BOUNDARY_LIMIT) {
-      const penetration = Math.abs(position.z) + bikeHalfWidth - BOUNDARY_LIMIT;
-      return {
-        hit: true,
-        normal: new THREE.Vector3(0, 0, Math.sign(position.z)),
-        penetration
-      };
-    }
+  const checkCollisions = useCallback(
+    (position: THREE.Vector3, trail: THREE.Vector3[]): { hit: boolean; normal: THREE.Vector3 | null; corrected: THREE.Vector3 } => {
+      const bikeHalfWidth = 0.15;
 
-    // Check trail collisions with precise hitbox
-    if (trail.length > 2) {
-      for (let i = 0; i < trail.length - 2; i++) {
-        const start = trail[i];
-        const end = trail[i + 1];
-        const segDir = new THREE.Vector3().subVectors(end, start);
-        const segLength = segDir.length();
-        if (segLength === 0) continue;
-        const segNorm = segDir.clone().normalize();
-        const toPoint = new THREE.Vector3().subVectors(position, start);
-        const proj = THREE.MathUtils.clamp(toPoint.dot(segNorm), 0, segLength);
-        const closest = start.clone().add(segNorm.multiplyScalar(proj));
-        const dist = closest.distanceTo(position);
-        if (dist < TRAIL_HIT_DISTANCE) {
-          const normal = position.clone().sub(closest).normalize();
-          const penetration = TRAIL_HIT_DISTANCE - dist;
-          return { hit: true, normal, penetration };
+      let hit = false;
+      let normal: THREE.Vector3 | null = null;
+      const corrected = position.clone();
+
+      // Boundary checks
+      if (corrected.x + bikeHalfWidth > BOUNDARY_LIMIT) {
+        corrected.x = BOUNDARY_LIMIT - bikeHalfWidth;
+        hit = true;
+        normal = new THREE.Vector3(1, 0, 0);
+      } else if (corrected.x - bikeHalfWidth < -BOUNDARY_LIMIT) {
+        corrected.x = -BOUNDARY_LIMIT + bikeHalfWidth;
+        hit = true;
+        normal = new THREE.Vector3(-1, 0, 0);
+      }
+
+      if (corrected.z + bikeHalfWidth > BOUNDARY_LIMIT) {
+        corrected.z = BOUNDARY_LIMIT - bikeHalfWidth;
+        hit = true;
+        normal = new THREE.Vector3(0, 0, 1);
+      } else if (corrected.z - bikeHalfWidth < -BOUNDARY_LIMIT) {
+        corrected.z = -BOUNDARY_LIMIT + bikeHalfWidth;
+        hit = true;
+        normal = new THREE.Vector3(0, 0, -1);
+      }
+
+      // Trail collisions (segments are axis aligned)
+      if (trail.length > 2) {
+        for (let i = 0; i < trail.length - 2; i++) {
+          const start = trail[i];
+          const end = trail[i + 1];
+
+          if (start.x === end.x) {
+            const segX = start.x;
+            const minZ = Math.min(start.z, end.z) - bikeHalfWidth;
+            const maxZ = Math.max(start.z, end.z) + bikeHalfWidth;
+            if (corrected.z >= minZ && corrected.z <= maxZ && Math.abs(corrected.x - segX) < bikeHalfWidth) {
+              corrected.x = segX + Math.sign(corrected.x - segX) * bikeHalfWidth;
+              hit = true;
+              normal = new THREE.Vector3(Math.sign(corrected.x - segX), 0, 0);
+              break;
+            }
+          } else if (start.z === end.z) {
+            const segZ = start.z;
+            const minX = Math.min(start.x, end.x) - bikeHalfWidth;
+            const maxX = Math.max(start.x, end.x) + bikeHalfWidth;
+            if (corrected.x >= minX && corrected.x <= maxX && Math.abs(corrected.z - segZ) < bikeHalfWidth) {
+              corrected.z = segZ + Math.sign(corrected.z - segZ) * bikeHalfWidth;
+              hit = true;
+              normal = new THREE.Vector3(0, 0, Math.sign(corrected.z - segZ));
+              break;
+            }
+          }
         }
       }
-    }
 
-    return { hit: false, normal: null, penetration: 0 };
-  }, []);
+      return { hit, normal, corrected };
+    },
+    []
+  );
 
   const updateBike = useCallback(() => {
     if (gameState !== 'playing') return;
@@ -265,27 +285,19 @@ const Game3D: React.FC = () => {
     let newGrindNormal = bike.grindNormal;
 
     const collision = checkCollisions(potentialPosition, bike.trail);
-    if (collision.hit) {
-      newPosition.copy(potentialPosition);
-      if (collision.normal) {
-        newPosition.add(collision.normal.clone().multiplyScalar(-collision.penetration));
-        newGrindNormal = collision.normal.clone();
-        const push = direction.dot(newGrindNormal);
-        if (push > 0) {
-          newGrindOffset = Math.min(bike.grindOffset + 0.02, 0.3);
-          currentHealth = Math.max(0, bike.health - DAMAGE_RATE);
-          setBikeHealth(currentHealth);
-          lastHitFrameRef.current = frameCountRef.current;
-        } else if (newGrindOffset > 0) {
-          newGrindOffset = Math.max(0, newGrindOffset - 0.02);
-        }
-        newPosition.add(newGrindNormal.clone().multiplyScalar(-newGrindOffset));
-      } else {
-        newPosition.copy(bike.position);
+    newPosition.copy(collision.corrected);
+    if (collision.hit && collision.normal) {
+      newGrindNormal = collision.normal.clone();
+      const push = direction.dot(newGrindNormal);
+      if (push > 0) {
+        newGrindOffset = Math.min(bike.grindOffset + 0.02, 0.3);
         currentHealth = Math.max(0, bike.health - DAMAGE_RATE);
         setBikeHealth(currentHealth);
         lastHitFrameRef.current = frameCountRef.current;
+      } else if (newGrindOffset > 0) {
+        newGrindOffset = Math.max(0, newGrindOffset - 0.02);
       }
+      newPosition.add(newGrindNormal.clone().multiplyScalar(-newGrindOffset));
     } else {
       newGrindNormal = null;
       newGrindOffset = 0;
