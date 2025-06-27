@@ -179,14 +179,24 @@ const Game3D: React.FC = () => {
     trailMeshesRef.current.push(trailMesh);
   }, []);
 
-  const checkCollisions = useCallback((position: THREE.Vector3, trail: THREE.Vector3[]): { hit: boolean; normal: THREE.Vector3 | null } => {
+  const checkCollisions = useCallback((position: THREE.Vector3, trail: THREE.Vector3[]): { hit: boolean; normal: THREE.Vector3 | null; penetration: number } => {
     // Check boundary collisions with very small tolerance
     const bikeHalfWidth = 0.15;
     if (Math.abs(position.x) + bikeHalfWidth > BOUNDARY_LIMIT) {
-      return { hit: true, normal: new THREE.Vector3(Math.sign(position.x), 0, 0) };
+      const penetration = Math.abs(position.x) + bikeHalfWidth - BOUNDARY_LIMIT;
+      return {
+        hit: true,
+        normal: new THREE.Vector3(Math.sign(position.x), 0, 0),
+        penetration
+      };
     }
     if (Math.abs(position.z) + bikeHalfWidth > BOUNDARY_LIMIT) {
-      return { hit: true, normal: new THREE.Vector3(0, 0, Math.sign(position.z)) };
+      const penetration = Math.abs(position.z) + bikeHalfWidth - BOUNDARY_LIMIT;
+      return {
+        hit: true,
+        normal: new THREE.Vector3(0, 0, Math.sign(position.z)),
+        penetration
+      };
     }
 
     // Check trail collisions with precise hitbox
@@ -204,12 +214,13 @@ const Game3D: React.FC = () => {
         const dist = closest.distanceTo(position);
         if (dist < TRAIL_HIT_DISTANCE) {
           const normal = position.clone().sub(closest).normalize();
-          return { hit: true, normal };
+          const penetration = TRAIL_HIT_DISTANCE - dist;
+          return { hit: true, normal, penetration };
         }
       }
     }
 
-    return { hit: false, normal: null };
+    return { hit: false, normal: null, penetration: 0 };
   }, []);
 
   const updateBike = useCallback(() => {
@@ -255,16 +266,9 @@ const Game3D: React.FC = () => {
 
     const collision = checkCollisions(potentialPosition, bike.trail);
     if (collision.hit) {
-      // Start from the attempted position and clamp against the wall so
-      // motion parallel to the surface is preserved
       newPosition.copy(potentialPosition);
       if (collision.normal) {
-        if (Math.abs(newPosition.x) + 0.15 > BOUNDARY_LIMIT && collision.normal.x !== 0) {
-          newPosition.x = Math.sign(newPosition.x) * (BOUNDARY_LIMIT - 0.15);
-        }
-        if (Math.abs(newPosition.z) + 0.15 > BOUNDARY_LIMIT && collision.normal.z !== 0) {
-          newPosition.z = Math.sign(newPosition.z) * (BOUNDARY_LIMIT - 0.15);
-        }
+        newPosition.add(collision.normal.clone().multiplyScalar(-collision.penetration));
         newGrindNormal = collision.normal.clone();
         const push = direction.dot(newGrindNormal);
         if (push > 0) {
@@ -277,14 +281,12 @@ const Game3D: React.FC = () => {
         }
         newPosition.add(newGrindNormal.clone().multiplyScalar(-newGrindOffset));
       } else {
-        // Unknown normal - just stay put and take damage
         newPosition.copy(bike.position);
         currentHealth = Math.max(0, bike.health - DAMAGE_RATE);
         setBikeHealth(currentHealth);
         lastHitFrameRef.current = frameCountRef.current;
       }
     } else {
-      // Not colliding
       newGrindNormal = null;
       newGrindOffset = 0;
     }
