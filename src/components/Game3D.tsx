@@ -15,8 +15,8 @@ interface BikeState {
 }
 
 // Tunable gameplay constants
-const BIKE_SPEED = 0.1; // moderate default speed
-const TURN_DELAY_FRAMES = 20; // minimum frames between consecutive turns
+const BIKE_SPEED = 0.08; // slightly slower for easier control
+const TURN_DELAY_FRAMES = 25; // force wider spacing between double turns
 const BOUNDARY_LIMIT = 44.975; // nearly flush with the wall
 const TRAIL_HIT_DISTANCE = 0.2; // tighter trail hitbox
 const REGEN_DELAY_FRAMES = 60; // start regenerating after ~1s
@@ -149,13 +149,14 @@ const Game3D: React.FC = () => {
 
     const geometry = new THREE.BoxGeometry(0.02, TRAIL_END_HEIGHT, length, 1, 1, 1);
 
-    // Taper only within the first meter after a turn
+    // Smooth taper only near the bike after each turn
     const posAttr = geometry.attributes.position as THREE.BufferAttribute;
+    const startProg = Math.min(startDistance / TAPER_DISTANCE, 1);
+    const endProg = Math.min((startDistance + length) / TAPER_DISTANCE, 1);
     for (let i = 0; i < posAttr.count; i++) {
       const z = posAttr.getZ(i); // -length/2 to length/2
       const t = (z + length / 2) / length; // 0 at start, 1 at end
-      const dist = startDistance + t * length;
-      const progress = Math.min(dist / TAPER_DISTANCE, 1);
+      const progress = startProg + (endProg - startProg) * t;
       const height = THREE.MathUtils.lerp(TRAIL_START_HEIGHT, TRAIL_END_HEIGHT, progress);
       const scale = height / TRAIL_END_HEIGHT;
       const originalY = posAttr.getY(i);
@@ -181,39 +182,59 @@ const Game3D: React.FC = () => {
     trailMeshesRef.current.push(trailMesh);
   }, []);
 
-  const checkCollisions = useCallback((position: THREE.Vector3, trail: THREE.Vector3[]): { hit: boolean; normal: THREE.Vector3 | null } => {
-    const bikeHalfWidth = 0.15;
-    const limit = BOUNDARY_LIMIT - 0.001;
-    // Treat being exactly at the boundary as a hit so grinding remains stable
-    if (Math.abs(position.x) + bikeHalfWidth >= limit) {
-      return { hit: true, normal: new THREE.Vector3(Math.sign(position.x), 0, 0) };
-    }
-    if (Math.abs(position.z) + bikeHalfWidth >= limit) {
-      return { hit: true, normal: new THREE.Vector3(0, 0, Math.sign(position.z)) };
-    }
+  const checkCollisions = useCallback(
+    (
+      position: THREE.Vector3,
+      trail: THREE.Vector3[]
+    ): { hit: boolean; normal: THREE.Vector3 | null; penetration: number } => {
+      const bikeHalfWidth = 0.15;
+      const limit = BOUNDARY_LIMIT - 0.001;
 
-    // Check trail collisions with precise hitbox
-    if (trail.length > 2) {
-      for (let i = 0; i < trail.length - 2; i++) {
-        const start = trail[i];
-        const end = trail[i + 1];
-        const segDir = new THREE.Vector3().subVectors(end, start);
-        const segLength = segDir.length();
-        if (segLength === 0) continue;
-        const segNorm = segDir.clone().normalize();
-        const toPoint = new THREE.Vector3().subVectors(position, start);
-        const proj = THREE.MathUtils.clamp(toPoint.dot(segNorm), 0, segLength);
-        const closest = start.clone().add(segNorm.multiplyScalar(proj));
-        const dist = closest.distanceTo(position);
-        if (dist < TRAIL_HIT_DISTANCE) {
-          const normal = position.clone().sub(closest).normalize();
-          return { hit: true, normal };
+      let bestPenetration = 0;
+      let bestNormal: THREE.Vector3 | null = null;
+
+      // Boundary check
+      const overX = Math.abs(position.x) + bikeHalfWidth - limit;
+      if (overX > bestPenetration) {
+        bestPenetration = overX;
+        bestNormal = new THREE.Vector3(Math.sign(position.x), 0, 0);
+      }
+      const overZ = Math.abs(position.z) + bikeHalfWidth - limit;
+      if (overZ > bestPenetration) {
+        bestPenetration = overZ;
+        bestNormal = new THREE.Vector3(0, 0, Math.sign(position.z));
+      }
+
+      // Trail collisions with precise hitbox
+      if (trail.length > 2) {
+        for (let i = 0; i < trail.length - 2; i++) {
+          const start = trail[i];
+          const end = trail[i + 1];
+          const segDir = new THREE.Vector3().subVectors(end, start);
+          const segLength = segDir.length();
+          if (segLength === 0) continue;
+          const segNorm = segDir.clone().normalize();
+          const toPoint = new THREE.Vector3().subVectors(position, start);
+          const proj = THREE.MathUtils.clamp(toPoint.dot(segNorm), 0, segLength);
+          const closest = start.clone().add(segNorm.multiplyScalar(proj));
+          const dist = closest.distanceTo(position);
+          if (dist < TRAIL_HIT_DISTANCE) {
+            const penetration = TRAIL_HIT_DISTANCE - dist;
+            if (penetration > bestPenetration) {
+              bestPenetration = penetration;
+              bestNormal = position.clone().sub(closest).normalize();
+            }
+          }
         }
       }
-    }
 
-    return { hit: false, normal: null };
-  }, []);
+      if (bestNormal) {
+        return { hit: true, normal: bestNormal, penetration: bestPenetration };
+      }
+      return { hit: false, normal: null, penetration: 0 };
+    },
+    []
+  );
 
   const updateBike = useCallback(() => {
     if (gameState !== 'playing') return;
@@ -259,34 +280,25 @@ const Game3D: React.FC = () => {
     const collision = checkCollisions(newPosition, bike.trail);
     if (collision.hit && collision.normal) {
       const push = delta.dot(collision.normal);
-      const axis = Math.abs(collision.normal.x) > 0 ? 'x' : 'z';
-      const half = 0.15;
-      const limit = BOUNDARY_LIMIT - 0.001;
-      let overshoot = Math.abs(newPosition[axis]) + half - limit;
-      if (overshoot < 0) overshoot = 0;
 
-      if (push > 0) {
-        // Slide along the surface and accumulate grind offset
-        newPosition.addScaledVector(collision.normal, -(push + overshoot));
-      } else {
-        // Clamp out of the wall when turning away
-        newPosition.addScaledVector(collision.normal, -overshoot);
-      }
+      // Remove any penetration and prevent moving further inside
+      newPosition.addScaledVector(collision.normal, -(collision.penetration + Math.max(push, 0)));
 
-      if (push > 0 || overshoot > 0) {
-        newGrindOffset = Math.min(bike.grindOffset + push + overshoot, 0.3);
+      if (push > 0 || collision.penetration > 0) {
+        newGrindOffset = Math.min(bike.grindOffset + push + collision.penetration, 0.3);
         currentHealth = Math.max(0, bike.health - DAMAGE_RATE);
         setBikeHealth(currentHealth);
         lastHitFrameRef.current = frameCountRef.current;
+      } else {
+        newGrindOffset = Math.max(0, bike.grindOffset - 0.05);
       }
+
       newGrindNormal = collision.normal.clone();
     } else if (bike.grindNormal) {
-      // Maintain previous grind state when staying close to the wall
-      const nearX = Math.abs(newPosition.x) + 0.15 >= BOUNDARY_LIMIT - 0.05;
-      const nearZ = Math.abs(newPosition.z) + 0.15 >= BOUNDARY_LIMIT - 0.05;
-      if (!(nearX || nearZ)) {
+      // Gradually release from the wall when no longer colliding
+      newGrindOffset = Math.max(0, bike.grindOffset - 0.05);
+      if (newGrindOffset === 0) {
         newGrindNormal = null;
-        newGrindOffset = 0;
       }
     }
 
