@@ -1,3 +1,84 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Modern Health Bar Styles */
+.health-bar-container {
+  position: relative;
+  width: 300px;
+  height: 8px;
+  background: rgba(15, 15, 15, 0.8);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.health-bar-fill {
+  height: 100%;
+  transition: width 0.1s ease-out;
+  position: relative;
+  overflow: hidden;
+}
+
+.health-bar-fill::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.3) 50%, transparent 100%);
+  animation: health-shimmer 2s infinite;
+}
+
+.health-bar-fill.health-critical::after {
+  animation: health-pulse 0.5s infinite alternate;
+}
+
+.health-bar-text {
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  margin-top: 6px;
+  color: #000000;
+}
+
+/* UI Text Style - matches health bar font */
+.ui-text {
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+}
+
+@keyframes health-shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+@keyframes health-pulse {
+  0% { opacity: 0.6; }
+  100% { opacity: 1; }
+}
+
+/* Health bar colors */
+.health-high {
+  background: linear-gradient(90deg, #00ff88 0%, #00cc6a 100%);
+  box-shadow: 0 0 8px rgba(0, 255, 136, 0.3);
+}
+
+.health-medium {
+  background: linear-gradient(90deg, #ffaa00 0%, #ff8800 100%);
+  box-shadow: 0 0 8px rgba(255, 170, 0, 0.3);
+}
+
+.health-low {
+  background: linear-gradient(90deg, #ff4444 0%, #cc0000 100%);
+  box-shadow: 0 0 8px rgba(255, 68, 68, 0.4);
+}
+
+.health-critical {
+  background: linear-gradient(90deg, #ff0000 0%, #990000 100%);
+  box-shadow: 0 0 12px rgba(255, 0, 0, 0.6);
+}

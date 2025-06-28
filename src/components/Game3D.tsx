@@ -18,12 +18,24 @@ interface BikeState {
 const BIKE_SPEED = 0.065; // slightly slower default speed
 const TURN_DELAY_FRAMES = 20; // minimum frames between consecutive turns
 const BOUNDARY_LIMIT = 44.975; // nearly flush with the wall
-const TRAIL_HIT_DISTANCE = 0.2; // tighter trail hitbox
 const REGEN_DELAY_FRAMES = 60; // start regenerating after ~1s
 
 const TRAIL_WIDTH = 0.05; // consistent trail thickness
 const TRAIL_HEIGHT = 0.5; // shorter trail wall
 const TRAIL_MAX_FRAMES = 50 * 60; // trail lasts about 50 seconds
+
+// Zone/ring constants
+const RING_INITIAL_RADIUS = 25;
+const RING_MIN_RADIUS = 3;
+const RING_SHRINK_TIME = 270 * 60; // 4.5 minutes at 60fps (3x slower)
+const RING_SHRINK_PER_FRAME = (RING_INITIAL_RADIUS - RING_MIN_RADIUS) / RING_SHRINK_TIME;
+const RING_DEPLETION_FRAMES = 30 * 60; // 30 seconds at 60fps (much slower burn)
+const RING_DEPLETION_PER_FRAME = 100 / RING_DEPLETION_FRAMES;
+const RING_SPIN_SPEED = 0.0005; // Much slower, steady spin
+
+// Health regeneration constants
+const SLOW_REGEN_RATE = 0.03; // Slow regen after zone damage (1.8% per second)
+const FAST_REGEN_RATE = 0.2; // Very fast regen after collision damage (12% per second)
 
 const Game3D: React.FC = () => {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -42,8 +54,17 @@ const Game3D: React.FC = () => {
   const bikeVisualPositionRef = useRef<THREE.Vector3>(new THREE.Vector3(0, 0, 0));
   const bikeVisualRotationRef = useRef<number>(0);
   
+  // Ring and zone tracking
+  const ringRef = useRef<THREE.Group>();
+  const innerRingRef = useRef<THREE.Group>();
+  const outsideRingFramesRef = useRef<number>(0);
+  const currentRingRadiusRef = useRef<number>(RING_INITIAL_RADIUS);
+  
   const [gameState, setGameState] = useState<'waiting' | 'playing' | 'gameOver'>('waiting');
   const [bikeHealth, setBikeHealth] = useState(100);
+  
+  // Track the type of last damage taken for different regen rates
+  const lastDamageTypeRef = useRef<'collision' | 'zone' | null>(null);
   
   // Use a ref for bike state so animation loop always has latest value
   const bikeStateRef = useRef<BikeState>({
@@ -178,6 +199,69 @@ const Game3D: React.FC = () => {
       mesh.position.set(...wall.pos);
       scene.add(mesh);
     });
+
+    // Zone ring - threatening lined ring with visible gaps for spinning effect
+    const ringGroup = new THREE.Group();
+    
+    // Create multiple ring segments with gaps for visible spinning
+    const numSegments = 32; // Number of line segments
+    const segmentAngle = (Math.PI * 2) / numSegments;
+    const gapRatio = 0.3; // 30% gaps, 70% lines
+    
+    for (let i = 0; i < numSegments; i++) {
+      const startAngle = i * segmentAngle;
+      const endAngle = startAngle + (segmentAngle * (1 - gapRatio));
+      
+      const segmentGeometry = new THREE.TorusGeometry(
+        RING_INITIAL_RADIUS, 0.15, 8, 16, 
+        endAngle - startAngle
+      );
+      
+      const segmentMaterial = new THREE.MeshBasicMaterial({
+        color: 0xff1111, // Bright threatening red
+        transparent: true,
+        opacity: 0.25, // More visible
+        side: THREE.DoubleSide
+      });
+      
+      const segment = new THREE.Mesh(segmentGeometry, segmentMaterial);
+      segment.rotation.x = Math.PI / 2;
+      segment.rotation.z = startAngle; // Position the segment correctly
+      ringGroup.add(segment);
+    }
+    
+    ringGroup.position.y = 0.05;
+    scene.add(ringGroup);
+    ringRef.current = ringGroup;
+
+    // Add inner threatening ring with different pattern
+    const innerRingGroup = new THREE.Group();
+    
+    for (let i = 0; i < numSegments; i++) {
+      const startAngle = i * segmentAngle + segmentAngle * 0.5; // Offset pattern
+      const endAngle = startAngle + (segmentAngle * 0.4);
+      
+      const segmentGeometry = new THREE.TorusGeometry(
+        RING_INITIAL_RADIUS * 0.96, 0.1, 6, 12,
+        endAngle - startAngle
+      );
+      
+      const segmentMaterial = new THREE.MeshBasicMaterial({
+        color: 0x330000, // Dark menacing red
+        transparent: true,
+        opacity: 0.2, // More visible
+        side: THREE.DoubleSide
+      });
+      
+      const segment = new THREE.Mesh(segmentGeometry, segmentMaterial);
+      segment.rotation.x = Math.PI / 2;
+      segment.rotation.z = startAngle; // Position the segment correctly
+      innerRingGroup.add(segment);
+    }
+    
+    innerRingGroup.position.y = 0.051;
+    scene.add(innerRingGroup);
+    innerRingRef.current = innerRingGroup;
 
   }, []);
 
@@ -387,7 +471,7 @@ const Game3D: React.FC = () => {
     let currentHealth = bike.health;
     let newPosition = potentialPosition.clone();
     let newGrindOffset = bike.grindOffset;
-    let newGrindNormal = bike.grindNormal;
+    const newGrindNormal = bike.grindNormal;
     const collision = checkCollisions(
       potentialPosition,
       [...newTrail, potentialPosition]
@@ -406,6 +490,7 @@ const Game3D: React.FC = () => {
         currentHealth = Math.max(0, bike.health - 1.2);
         setBikeHealth(currentHealth);
         lastHitFrameRef.current = frameCountRef.current;
+        lastDamageTypeRef.current = 'collision'; // Track collision damage
       } else {
         // Grinding parallel to wall, no damage
         newGrindOffset = Math.min(bike.grindOffset + 0.01, 0.3);
@@ -416,11 +501,47 @@ const Game3D: React.FC = () => {
       newGrindOffset = 0;
     }
 
-    // Regenerate health if not taking head-on damage and enough time passed
-    const framesSinceHit = frameCountRef.current - lastHitFrameRef.current;
-    if (!headOn && framesSinceHit > REGEN_DELAY_FRAMES && currentHealth < bike.maxHealth) {
-      currentHealth = Math.min(bike.maxHealth, currentHealth + 0.5);
+    // Zone ring health depletion - check if outside the ring
+    const distanceFromCenter = Math.sqrt(newPosition.x * newPosition.x + newPosition.z * newPosition.z);
+    const isOutsideRing = distanceFromCenter > currentRingRadiusRef.current;
+    
+    if (isOutsideRing) {
+      // Outside the ring - deplete health slowly
+      outsideRingFramesRef.current++;
+      currentHealth = Math.max(0, currentHealth - RING_DEPLETION_PER_FRAME);
       setBikeHealth(currentHealth);
+      lastDamageTypeRef.current = 'zone'; // Track zone damage
+    } else {
+      // Inside the ring - reset counter
+      outsideRingFramesRef.current = 0;
+    }
+
+    // Regenerate health if not taking head-on damage, not outside ring, and enough time passed
+    const framesSinceHit = frameCountRef.current - lastHitFrameRef.current;
+    if (!headOn && !isOutsideRing && framesSinceHit > REGEN_DELAY_FRAMES && currentHealth < bike.maxHealth) {
+      // Use different regen rates based on last damage type
+      const regenRate = lastDamageTypeRef.current === 'zone' ? SLOW_REGEN_RATE : FAST_REGEN_RATE;
+      currentHealth = Math.min(bike.maxHealth, currentHealth + regenRate);
+      setBikeHealth(currentHealth);
+    }
+
+    // Shrink the ring over time
+    if (currentRingRadiusRef.current > RING_MIN_RADIUS) {
+      currentRingRadiusRef.current = Math.max(
+        RING_MIN_RADIUS, 
+        currentRingRadiusRef.current - RING_SHRINK_PER_FRAME
+      );
+      
+      // Update both ring meshes scale with stable positioning
+      const scale = currentRingRadiusRef.current / RING_INITIAL_RADIUS;
+      if (ringRef.current) {
+        ringRef.current.position.set(0, 0.05, 0);
+        ringRef.current.scale.setScalar(scale);
+      }
+      if (innerRingRef.current) {
+        innerRingRef.current.position.set(0, 0.051, 0);
+        innerRingRef.current.scale.setScalar(scale);
+      }
     }
 
     // Add to trail every certain distance
@@ -516,6 +637,57 @@ const Game3D: React.FC = () => {
 
     updateCamera();
 
+    // Add pulsing effect to rings and slow rotation
+    if (ringRef.current && innerRingRef.current) {
+      const pulseIntensity = 0.4; // More aggressive pulse
+      const timeScale = frameCountRef.current * 0.08; // Faster pulsing for threat
+      const pulse = 1 + Math.sin(timeScale) * pulseIntensity;
+      
+      // Check if player is outside ring for danger effects
+      const bikePos = bikeStateRef.current.position;
+      const distanceFromCenter = Math.sqrt(bikePos.x * bikePos.x + bikePos.z * bikePos.z);
+      const isOutsideRing = distanceFromCenter > currentRingRadiusRef.current;
+      
+      // More aggressive effects when player is in danger
+      const dangerMultiplier = isOutsideRing ? 2.5 : 1.0;
+      const basePulse = isOutsideRing ? 0.3 : 0.15;
+      const innerBasePulse = isOutsideRing ? 0.2 : 0.1;
+      
+      // Apply visible pulsing to opacity for all segments
+      ringRef.current.children.forEach((child) => {
+        const mesh = child as THREE.Mesh;
+        if (mesh.material) {
+          const material = mesh.material as THREE.MeshBasicMaterial;
+          material.opacity = Math.max(0.05, basePulse * pulse * dangerMultiplier);
+          if (isOutsideRing) {
+            // Flash brighter red when taking damage
+            material.color.setHex(0xff3333);
+          } else {
+            material.color.setHex(0xff1111);
+          }
+        }
+      });
+      
+      innerRingRef.current.children.forEach((child) => {
+        const mesh = child as THREE.Mesh;
+        if (mesh.material) {
+          const material = mesh.material as THREE.MeshBasicMaterial;
+          material.opacity = Math.max(0.03, innerBasePulse * pulse * dangerMultiplier);
+          if (isOutsideRing) {
+            // Flash darker red when taking damage
+            material.color.setHex(0x550000);
+          } else {
+            material.color.setHex(0x330000);
+          }
+        }
+      });
+      
+      // More dramatic rotation when player is in danger - only rotate around Y axis to stay flat
+      const spinMultiplier = isOutsideRing ? 2 : 1; // Much more reasonable multiplier
+      ringRef.current.rotation.y += RING_SPIN_SPEED * 3 * spinMultiplier;
+      innerRingRef.current.rotation.y -= RING_SPIN_SPEED * 2 * spinMultiplier;
+    }
+
     // Check if bike died
     if (!bike.alive && gameState === 'playing') {
       setGameState('gameOver');
@@ -597,6 +769,39 @@ const Game3D: React.FC = () => {
     // --- Reset grind depth map ---
     grindDepthMapRef.current = {};
 
+    // Reset ring zone tracking
+    outsideRingFramesRef.current = 0;
+    currentRingRadiusRef.current = RING_INITIAL_RADIUS;
+    
+    // Reset damage type tracking
+    lastDamageTypeRef.current = null;
+    
+    // Reset both ring scales and positions
+    if (ringRef.current) {
+      ringRef.current.scale.setScalar(1.0);
+      ringRef.current.position.set(0, 0.05, 0);
+      ringRef.current.rotation.y = 0; // Reset Y rotation to keep flat
+      ringRef.current.children.forEach((child) => {
+        const mesh = child as THREE.Mesh;
+        if (mesh.material) {
+          const material = mesh.material as THREE.MeshBasicMaterial;
+          material.opacity = 0.15;
+        }
+      });
+    }
+    if (innerRingRef.current) {
+      innerRingRef.current.scale.setScalar(1.0);
+      innerRingRef.current.position.set(0, 0.051, 0);
+      innerRingRef.current.rotation.y = 0; // Reset Y rotation to keep flat
+      innerRingRef.current.children.forEach((child) => {
+        const mesh = child as THREE.Mesh;
+        if (mesh.material) {
+          const material = mesh.material as THREE.MeshBasicMaterial;
+          material.opacity = 0.1;
+        }
+      });
+    }
+
     setBikeHealth(100);
     setGameState('playing');
   }, []);
@@ -651,8 +856,8 @@ const Game3D: React.FC = () => {
       
       {/* UI Overlay */}
       <div className="absolute top-4 left-4 text-white z-10">
-        <h1 className="text-2xl font-bold text-blue-400 mb-2">3D TRON BIKE</h1>
-        <div className="text-sm text-gray-300">
+        <h1 className="text-2xl font-bold text-blue-400 mb-2 ui-text">hypoxia</h1>
+        <div className="text-sm text-gray-300 ui-text">
           <p>Z/← Turn Left | X/→ Turn Right</p>
           <p>Avoid walls and your own trail!</p>
         </div>
@@ -660,31 +865,31 @@ const Game3D: React.FC = () => {
 
       {/* Health Bar */}
       {gameState === 'playing' && (
-        <div className="absolute top-4 right-4 z-10">
-          <div className="w-64 h-6 bg-gray-900 rounded-full overflow-hidden border border-gray-700">
+        <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 z-10">
+          <div className="health-bar-container">
             <div
-              className="h-full transition-all duration-200"
-              style={{
-                width: `${bikeHealth}%`,
-                backgroundColor: bikeHealth > 60 ? '#3a7bd5' : bikeHealth > 30 ? '#f39c12' : '#e74c3c',
-                boxShadow: 'inset 0 0 10px rgba(0,0,0,0.3)'
-              }}
+              className={`health-bar-fill ${
+                bikeHealth > 60 ? 'health-high' : 
+                bikeHealth > 30 ? 'health-medium' : 
+                bikeHealth > 15 ? 'health-low' : 'health-critical'
+              }`}
+              style={{ width: `${bikeHealth}%` }}
             />
           </div>
-          <p className="text-xs text-gray-400 mt-1 text-right">
-            Health: {Math.round(bikeHealth)}%
-          </p>
+          <div className="health-bar-text text-center">
+            HEALTH {Math.round(bikeHealth)}%
+          </div>
         </div>
       )}
 
       {gameState === 'waiting' && (
         <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-80 z-20">
-          <div className="text-center text-white">
+          <div className="text-center text-white ui-text">
             <h2 className="text-3xl font-bold mb-4 text-blue-400">READY TO RACE?</h2>
             <p className="mb-6 text-gray-300">Navigate the 3D grid. Make 90° turns only.</p>
             <button
               onClick={startGame}
-              className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded transition-colors"
+              className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded transition-colors ui-text"
             >
               START GAME
             </button>
@@ -694,12 +899,12 @@ const Game3D: React.FC = () => {
 
       {gameState === 'gameOver' && (
         <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-90 z-20">
-          <div className="text-center text-white">
+          <div className="text-center text-white ui-text">
             <h2 className="text-3xl font-bold mb-4 text-red-400">GAME OVER</h2>
             <p className="mb-6 text-gray-300">You crashed into a wall or trail!</p>
             <button
               onClick={startGame}
-              className="px-8 py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded transition-colors"
+              className="px-8 py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded transition-colors ui-text"
             >
               PLAY AGAIN
             </button>
