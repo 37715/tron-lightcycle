@@ -48,8 +48,11 @@
 /* UI Text Style - matches health bar font */
 .ui-text {
   font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-  font-weight: 500;
-  letter-spacing: 0.5px;
+}
+
+/* Dynamic health bar width utility */
+.health-bar-width {
+  transition: width 0.1s ease-out;
 }
 
 @keyframes health-shimmer {
