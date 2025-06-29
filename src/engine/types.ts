@@ -11,6 +11,7 @@ export interface BikeState {
   maxHealth: number;
   grindOffset: number;
   grindNormal: THREE.Vector3 | null;
+  graceFramesRemaining: number; // Grace period protection
 }
 
 export interface GameConfig {
@@ -35,6 +36,9 @@ export interface GameConfig {
   // Health regeneration
   slowRegenRate: number;
   fastRegenRate: number;
+  
+  // Grace period system
+  graceFrames: number;
 }
 
 export interface CollisionResult {

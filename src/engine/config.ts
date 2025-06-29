@@ -7,10 +7,10 @@ export const DEFAULT_CONFIG: GameConfig = {
   boundaryLimit: 44.975,
   regenDelayFrames: 60,
   
-  // Trail constants
-  trailWidth: 0.05,
-  trailHeight: 0.5,
-  trailMaxFrames: 50 * 60, // 50 seconds at 60fps
+  // Trail constants - optimized for precision and moderate length
+  trailWidth: 0.03,   // Even thinner for maximum precision in tight mazes
+  trailHeight: 0.45,   // Slightly taller for better visibility
+  trailMaxFrames: 120 * 60, // 2 minutes - half again for better performance
   
   // Ring/zone constants
   ringInitialRadius: 25,
@@ -22,4 +22,7 @@ export const DEFAULT_CONFIG: GameConfig = {
   // Health regeneration
   slowRegenRate: 0.03, // Slow regen after zone damage (1.8% per second)
   fastRegenRate: 0.2,  // Very fast regen after collision damage (12% per second)
+  
+  // Grace period system (like ping rubber) - prevents instant death on brief wall contact
+  graceFrames: 45, // ~750ms grace period at 60fps (simulates moderate ping protection)
 };
