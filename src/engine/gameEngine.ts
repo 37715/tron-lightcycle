@@ -31,10 +31,11 @@ export class GameEngine {
       alive: true,
       speed: this.config.bikeSpeed,
       lastTurnFrame: 0,
-      health: 100,
-      maxHealth: 100,
+      health: 156, // 30% more health (120 * 1.3)
+      maxHealth: 156,
       grindOffset: 0,
-      grindNormal: null
+      grindNormal: null,
+      graceFramesRemaining: 0
     };
   }
 
@@ -153,8 +154,9 @@ export class GameEngine {
     // Update arena
     this.arena.shrinkRing();
 
-    // Add to trail
-    if (this.bikeState.trail.length === 0 || newPosition.distanceTo(this.bikeState.trail[this.bikeState.trail.length - 1]) > 0.5) {
+    // Add to trail - denser segments for much longer visible trails
+    const distanceThreshold = 0.3; // Denser segments = longer visible trail
+    if (this.bikeState.trail.length === 0 || newPosition.distanceTo(this.bikeState.trail[this.bikeState.trail.length - 1]) > distanceThreshold) {
       // Create trail segment if we have a previous point
       if (this.bikeState.trail.length > 0) {
         const lastPoint = this.bikeState.trail[this.bikeState.trail.length - 1];
@@ -165,17 +167,64 @@ export class GameEngine {
       this.trailFrames.push(this.frameCount);
     }
 
-    // Trim old trail segments
+    // Trim old trail segments - ensure collision and rendering stay in sync
+    let trimmedCount = 0;
+    const initialTrailLength = this.bikeState.trail.length;
     while (this.trailFrames.length > 0 && this.frameCount - this.trailFrames[0] > this.config.trailMaxFrames) {
       this.trailFrames.shift();
       if (this.bikeState.trail.length > 0) {
         this.bikeState.trail.shift();
       }
       this.segmentsToRemove++;
+      trimmedCount++;
+    }
+    
+    // Extra safeguard: if trail gets too long due to any sync issues, trim it
+    const maxAllowedTrailLength = Math.ceil(this.config.trailMaxFrames / 60) * 4; // Very generous limit
+    while (this.bikeState.trail.length > maxAllowedTrailLength) {
+      this.bikeState.trail.shift();
+      if (this.trailFrames.length > 0) {
+        this.trailFrames.shift();
+      }
+      this.segmentsToRemove++;
+      trimmedCount++;
+    }
+    
+    // Debug logging to track trail management
+    if (this.frameCount % 300 === 0) { // Log every 5 seconds
+      console.log(`Trail Status: Length=${this.bikeState.trail.length}, Frames=${this.trailFrames.length}, MaxAge=${this.frameCount - (this.trailFrames[0] || this.frameCount)}, Segments to remove: ${this.segmentsToRemove}`);
+    }
+    if (trimmedCount > 0) {
+      console.log(`Trimmed ${trimmedCount} trail segments. Length: ${initialTrailLength} -> ${this.bikeState.trail.length}`);
     }
 
-    // Check if bike died
-    this.bikeState.alive = this.bikeState.health > 0;
+    // Grace period system - handle death protection
+    if (this.bikeState.health <= 0) {
+      if (this.bikeState.graceFramesRemaining <= 0) {
+        // Start grace period when health hits 0
+        this.bikeState.graceFramesRemaining = this.config.graceFrames;
+        console.log(`Grace period started: ${this.config.graceFrames} frames protection`);
+      } else {
+        // Count down grace frames
+        this.bikeState.graceFramesRemaining--;
+        
+        // If still taking damage during grace period, reduce grace time faster
+        if (headOn || isOutsideRing) {
+          this.bikeState.graceFramesRemaining -= 2; // Faster countdown if still hitting things
+        }
+      }
+      
+      // Only die if grace period expired
+      if (this.bikeState.graceFramesRemaining <= 0) {
+        this.bikeState.alive = false;
+      }
+    } else {
+      // Reset grace period if health is above 0
+      this.bikeState.graceFramesRemaining = 0;
+    }
+
+    // Ensure health doesn't go below -10 (prevent infinite grace abuse)
+    this.bikeState.health = Math.max(-10, this.bikeState.health);
 
     return { healthChanged, newHealth: this.bikeState.health };
   }
@@ -208,5 +257,24 @@ export class GameEngine {
     const count = this.segmentsToRemove;
     this.segmentsToRemove = 0; // Reset after returning
     return count;
+  }
+
+  public getTrailLength(): number {
+    return this.bikeState.trail.length;
+  }
+
+  public getActiveTrailFrameSpan(): number {
+    if (this.trailFrames.length === 0) return 0;
+    return this.frameCount - this.trailFrames[0];
+  }
+
+  public getCollisionSafeTrailLength(): number {
+    // Return the number of trail segments that are safe to check for collision
+    // This should match the number of segments in the renderer
+    return Math.max(0, this.bikeState.trail.length - 10); // Skip recent segments
+  }
+
+  public getGraceFramesRemaining(): number {
+    return this.bikeState.graceFramesRemaining;
   }
 }

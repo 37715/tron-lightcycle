@@ -8,7 +8,23 @@ import { TrailRenderer } from '../renderer/TrailRenderer';
 import { ArenaRenderer } from '../renderer/ArenaRenderer';
 import { CameraController } from '../renderer/CameraController';
 
-const Game3D: React.FC = () => {
+interface Game3DProps {
+  onSettings?: () => void;
+  onGameOver?: () => void;
+  onResume?: () => void;
+  shouldResume?: boolean;
+  isPaused?: boolean;
+  keyBinds?: { turnLeft: string[]; turnRight: string[] }; // <-- add this
+}
+
+const Game3D: React.FC<Game3DProps> = ({
+  onSettings,
+  onGameOver,
+  onResume,
+  shouldResume,
+  isPaused = false,
+  keyBinds = { turnLeft: ['z', 'arrowleft'], turnRight: ['x', 'arrowright'] }
+}) => {
   const mountRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene>();
   const rendererRef = useRef<THREE.WebGLRenderer>();
@@ -22,8 +38,9 @@ const Game3D: React.FC = () => {
   const arenaRendererRef = useRef<ArenaRenderer>();
   const cameraControllerRef = useRef<CameraController>();
   
-  const [gameState, setGameState] = useState<GameState>('waiting');
+  const [gameState, setGameState] = useState<GameState>('playing'); // Start directly in playing state
   const [bikeHealth, setBikeHealth] = useState(100);
+  const [countdown, setCountdown] = useState<number | null>(null);
 
   const initScene = useCallback(() => {
     if (!mountRef.current) return;
@@ -72,11 +89,18 @@ const Game3D: React.FC = () => {
     if (!gameEngineRef.current || !bikeRendererRef.current || !trailRendererRef.current || 
         !arenaRendererRef.current || !cameraControllerRef.current) return;
 
-    if (gameState === 'playing') {
-      // Update game logic
-      const { healthChanged, newHealth } = gameEngineRef.current.update();
-      if (healthChanged) {
-        setBikeHealth(newHealth);
+    // Use prop isPaused instead of local state
+    if (gameState === 'playing' && !isPaused && countdown === null) {
+      const { newHealth } = gameEngineRef.current.update();
+      if (newHealth <= 0) {
+        onGameOver?.();
+      }
+      
+      // Always sync health bar to actual health (fix synchronization)
+      const actualHealth = Math.max(0, Math.min(156, newHealth));
+      const healthPercentage = (actualHealth / 156) * 100;
+      if (Math.abs(bikeHealth - healthPercentage) > 0.1) {
+        setBikeHealth(healthPercentage);
       }
 
       const bikeState = gameEngineRef.current.getBikeState();
@@ -91,24 +115,32 @@ const Game3D: React.FC = () => {
         cameraController.getVisualRotation()
       );
 
-      trailRendererRef.current.updateTrailGeometry(bikeState.trail);
+      // Trail rendering is now optimized with instanced mesh
+      trailRendererRef.current.updateTrailGeometry();
 
-      // Handle new trail segments
+      // Handle new trail segments efficiently
       const newSegments = gameEngineRef.current.getNewTrailSegments();
+      if (newSegments.length > 0) {
+        console.log(`Game3D: Adding ${newSegments.length} new trail segments`);
+      }
       newSegments.forEach(segment => {
         if (trailRendererRef.current) {
           trailRendererRef.current.createTrailSegment(segment.start, segment.end);
         }
       });
 
-      // Remove old trail segments
+      // Remove old trail segments efficiently
       const segmentsToRemove = gameEngineRef.current.getSegmentsToRemove();
+      if (segmentsToRemove > 0) {
+        console.log(`Game3D: Removing ${segmentsToRemove} trail segments`);
+      }
       for (let i = 0; i < segmentsToRemove; i++) {
         if (trailRendererRef.current) {
           trailRendererRef.current.removeOldestTrailSegment();
         }
       }
 
+      // Ring updates are now optimized to run every 4 frames
       const isOutsideRing = arena.isPositionOutsideRing(bikeState.position);
       arenaRendererRef.current.updateRings(
         arena.getRingScale(),
@@ -119,31 +151,57 @@ const Game3D: React.FC = () => {
       // Check if bike died
       if (!bikeState.alive && gameState === 'playing') {
         setGameState('gameOver');
+        setIsPaused(true);
+        if (onGameOver) {
+          onGameOver();
+        }
       }
     }
 
     rendererRef.current.render(sceneRef.current, cameraRef.current);
     animationIdRef.current = requestAnimationFrame(animate);
-  }, [gameState]);
+  }, [gameState, bikeHealth, isPaused, countdown, onGameOver]);
 
   const handleKeyDown = useCallback((event: KeyboardEvent) => {
     if (!gameEngineRef.current) return;
-    
     const key = event.key.toLowerCase();
-    if (key === 'z' || key === 'arrowleft') {
-      gameEngineRef.current.queueTurn('left');
+    if (key === 'escape' && onSettings) {
+      onSettings();
       event.preventDefault();
-    } else if (key === 'x' || key === 'arrowright') {
-      gameEngineRef.current.queueTurn('right');
+    } else if (keyBinds.turnLeft.includes(key)) {
+      if (!isPaused && countdown === null) {
+        gameEngineRef.current.queueTurn('left');
+      }
+      event.preventDefault();
+    } else if (keyBinds.turnRight.includes(key)) {
+      if (!isPaused && countdown === null) {
+        gameEngineRef.current.queueTurn('right');
+      }
       event.preventDefault();
     }
-  }, []);
+  }, [onSettings, isPaused, countdown, keyBinds]);
 
   const handleKeyUp = useCallback((event: KeyboardEvent) => {
     const key = event.key.toLowerCase();
-    if (key === 'z' || key === 'arrowleft' || key === 'x' || key === 'arrowright') {
+    if (
+      keyBinds.turnLeft.includes(key) ||
+      keyBinds.turnRight.includes(key)
+    ) {
       event.preventDefault();
     }
+  }, [keyBinds]);
+
+  const startCountdown = useCallback(() => {
+    setCountdown(3);
+    const countdownInterval = setInterval(() => {
+      setCountdown(prev => {
+        if (prev === null || prev <= 1) {
+          clearInterval(countdownInterval);
+          return null;
+        }
+        return prev - 1;
+      });
+    }, 1000);
   }, []);
 
   const startGame = useCallback(() => {
@@ -158,7 +216,16 @@ const Game3D: React.FC = () => {
 
     setBikeHealth(100);
     setGameState('playing');
-  }, []);
+    setIsPaused(false);
+    startCountdown();
+  }, [startCountdown]);
+
+  const resumeGame = useCallback(() => {
+    setIsPaused(false);
+    if (onResume) {
+      onResume();
+    }
+  }, [onResume]);
 
   const handleResize = useCallback(() => {
     if (!cameraRef.current || !rendererRef.current) return;
@@ -190,6 +257,14 @@ const Game3D: React.FC = () => {
       if (rendererRef.current && currentMount && currentMount.contains(rendererRef.current.domElement)) {
         currentMount.removeChild(rendererRef.current.domElement);
       }
+
+      // Dispose of renderer resources
+      if (trailRendererRef.current) {
+        trailRendererRef.current.dispose();
+      }
+      if (rendererRef.current) {
+        rendererRef.current.dispose();
+      }
     };
   }, [initScene, handleKeyDown, handleKeyUp, handleResize]);
 
@@ -207,6 +282,13 @@ const Game3D: React.FC = () => {
     };
   }, [gameState, animate]);
 
+  // Handle resume from parent
+  useEffect(() => {
+    if (shouldResume) {
+      resumeGame();
+    }
+  }, [shouldResume, resumeGame]);
+
   return (
     <div className="relative w-full h-screen overflow-hidden">
       <div ref={mountRef} className="w-full h-full" />
@@ -217,6 +299,19 @@ const Game3D: React.FC = () => {
         <div className="text-sm text-gray-300 ui-text">
           <p>Z/← Turn Left | X/→ Turn Right</p>
           <p>Avoid walls and your own trail!</p>
+          <p className="text-xs opacity-50 mt-1">Press ESC to open menu</p>
+          {gameState === 'playing' && gameEngineRef.current && trailRendererRef.current && (
+            <div className="mt-2 text-xs opacity-60">
+              <p>Trail Points: {gameEngineRef.current.getTrailLength()}</p>
+              <p>Rendered Segments: {trailRendererRef.current.getTrailMeshCount()}</p>
+              <p>Trail Age: {Math.floor(gameEngineRef.current.getActiveTrailFrameSpan() / 60)}s</p>
+              {gameEngineRef.current.getBikeState().graceFramesRemaining > 0 && (
+                <p className="text-yellow-400 font-bold">
+                  GRACE: {Math.ceil(gameEngineRef.current.getBikeState().graceFramesRemaining / 60 * 1000)}ms
+                </p>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -226,53 +321,39 @@ const Game3D: React.FC = () => {
           <div className="health-bar-container">
             <div
               className={`health-bar-fill ${
+                (gameEngineRef.current && gameEngineRef.current.getBikeState().graceFramesRemaining > 0) ? 'health-grace' :
                 bikeHealth > 60 ? 'health-high' : 
                 bikeHealth > 30 ? 'health-medium' : 
                 bikeHealth > 15 ? 'health-low' : 'health-critical'
               }`}
-              style={{ width: `${bikeHealth}%` }}
+              style={{ width: `${Math.max(bikeHealth, 0)}%` }}
             />
           </div>
           <div className="health-bar-text text-center">
-            HEALTH {Math.round(bikeHealth)}%
+            {(gameEngineRef.current && gameEngineRef.current.getBikeState().graceFramesRemaining > 0) ? (
+              <>GRACE PERIOD {Math.round(Math.max(bikeHealth, 0))}%</>
+            ) : (
+              <>HEALTH {Math.round(Math.max(bikeHealth, 0))}%</>
+            )}
           </div>
         </div>
       )}
 
-      {gameState === 'waiting' && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-80 z-20">
-          <div className="text-center text-white ui-text">
-            <h2 className="text-3xl font-bold mb-4 text-blue-400">READY TO RACE?</h2>
-            <p className="mb-6 text-gray-300">Navigate the 3D grid. Make 90° turns only.</p>
-            <button
-              onClick={startGame}
-              className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded transition-colors ui-text"
-            >
-              START GAME
-            </button>
-          </div>
-        </div>
-      )}
-
-      {gameState === 'gameOver' && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-90 z-20">
-          <div className="text-center text-white ui-text">
-            <h2 className="text-3xl font-bold mb-4 text-red-400">GAME OVER</h2>
-            <p className="mb-6 text-gray-300">You crashed into a wall or trail!</p>
-            <button
-              onClick={startGame}
-              className="px-8 py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded transition-colors ui-text"
-            >
-              PLAY AGAIN
-            </button>
+      {/* Countdown Display */}
+      {countdown !== null && (
+        <div className="absolute inset-0 flex items-center justify-center z-30">
+          <div className="countdown-display">
+            <div className={`countdown-number countdown-${countdown}`}>
+              {countdown}
+            </div>
           </div>
         </div>
       )}
 
       {/* Performance indicator */}
       <div className="absolute bottom-4 right-4 text-xs text-gray-500 z-10">
-        <p>Optimized for maximum performance</p>
-        <p>Minimal graphics • 60+ FPS target</p>
+        <p>Instanced Rendering • Esports Optimized</p>
+        <p>Trail: {trailRendererRef.current?.getTrailMeshCount() || 0} segments • 60+ FPS</p>
       </div>
     </div>
   );

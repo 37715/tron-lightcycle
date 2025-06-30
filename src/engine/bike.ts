@@ -42,9 +42,13 @@ export class BikePhysics {
       wallKey = `z${Math.sign(position.z)}`;
     }
 
-    // Check trail collisions - line segments not points
-    if (trail.length > 10) {
-      for (let i = 0; i < trail.length - 8; i++) {
+    // Check trail collisions - only check segments that should be visible/active
+    // Skip recent segments to prevent self-collision, and only check segments that are actually rendered
+    const segmentsToSkip = 10; // Skip last 10 segments to prevent self-collision
+    const maxSegmentsToCheck = Math.max(0, trail.length - segmentsToSkip - 1);
+    
+    if (maxSegmentsToCheck > 0) {
+      for (let i = 0; i < maxSegmentsToCheck; i++) {
         const start = trail[i];
         const end = trail[i + 1];
         

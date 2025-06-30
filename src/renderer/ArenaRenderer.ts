@@ -109,11 +109,22 @@ export class ArenaRenderer {
   private createGrid(): void {
     const gridSize = 200;
     const gridDivisions = 40;
+    const gridColor = new THREE.Color(0x222222); // Use a lighter gray for subtlety
+    const gridMaterial = new THREE.LineBasicMaterial({
+      color: gridColor,
+      opacity: 0.15, // Lower opacity for subtle effect
+      transparent: true,
+      depthWrite: false
+    });
+    
     const gridHelper = new THREE.GridHelper(
       gridSize, gridDivisions,
-      0x444444, // center line color
-      0x222222  // grid color
+      0x222222, // grid color (lighter gray)
+      0x222222  // grid color (lighter gray)
     );
+    (gridHelper.material as THREE.Material).opacity = 0.15;
+    (gridHelper.material as THREE.Material).transparent = true;
+    (gridHelper.material as THREE.Material).depthWrite = false;
     gridHelper.position.y = -0.5;
     this.scene.add(gridHelper);
   }
@@ -127,38 +138,40 @@ export class ArenaRenderer {
     this.ringGroup.position.set(0, 0.05, 0);
     this.innerRingGroup.position.set(0, 0.051, 0);
 
-    // Add pulsing and rotation effects
-    const pulseIntensity = 0.4;
-    const timeScale = frameCount * 0.08;
-    const pulse = 1 + Math.sin(timeScale) * pulseIntensity;
+    // Optimized pulsing - only update every 4 frames for performance
+    if (frameCount % 4 === 0) {
+      const pulseIntensity = 0.3; // Reduced intensity for performance
+      const timeScale = frameCount * 0.06; // Slower pulsing
+      const pulse = 1 + Math.sin(timeScale) * pulseIntensity;
+      
+      const dangerMultiplier = isPlayerOutsideRing ? 2.0 : 1.0; // Reduced multiplier
+      const basePulse = isPlayerOutsideRing ? 0.25 : 0.12; // Slightly reduced opacity changes
+      const innerBasePulse = isPlayerOutsideRing ? 0.15 : 0.08;
+      
+      // Apply pulsing to ring segments
+      this.ringGroup.children.forEach((child) => {
+        const mesh = child as THREE.Mesh;
+        if (mesh.material) {
+          const material = mesh.material as THREE.MeshBasicMaterial;
+          material.opacity = Math.max(0.05, basePulse * pulse * dangerMultiplier);
+          material.color.setHex(isPlayerOutsideRing ? 0xff3333 : 0xff1111);
+        }
+      });
+      
+      this.innerRingGroup.children.forEach((child) => {
+        const mesh = child as THREE.Mesh;
+        if (mesh.material) {
+          const material = mesh.material as THREE.MeshBasicMaterial;
+          material.opacity = Math.max(0.03, innerBasePulse * pulse * dangerMultiplier);
+          material.color.setHex(isPlayerOutsideRing ? 0x550000 : 0x330000);
+        }
+      });
+    }
     
-    const dangerMultiplier = isPlayerOutsideRing ? 2.5 : 1.0;
-    const basePulse = isPlayerOutsideRing ? 0.3 : 0.15;
-    const innerBasePulse = isPlayerOutsideRing ? 0.2 : 0.1;
-    
-    // Apply pulsing to ring segments
-    this.ringGroup.children.forEach((child) => {
-      const mesh = child as THREE.Mesh;
-      if (mesh.material) {
-        const material = mesh.material as THREE.MeshBasicMaterial;
-        material.opacity = Math.max(0.05, basePulse * pulse * dangerMultiplier);
-        material.color.setHex(isPlayerOutsideRing ? 0xff3333 : 0xff1111);
-      }
-    });
-    
-    this.innerRingGroup.children.forEach((child) => {
-      const mesh = child as THREE.Mesh;
-      if (mesh.material) {
-        const material = mesh.material as THREE.MeshBasicMaterial;
-        material.opacity = Math.max(0.03, innerBasePulse * pulse * dangerMultiplier);
-        material.color.setHex(isPlayerOutsideRing ? 0x550000 : 0x330000);
-      }
-    });
-    
-    // Rotation effects
-    const spinMultiplier = isPlayerOutsideRing ? 2 : 1;
-    this.ringGroup.rotation.y += this.config.ringSpinSpeed * 3 * spinMultiplier;
-    this.innerRingGroup.rotation.y -= this.config.ringSpinSpeed * 2 * spinMultiplier;
+    // Rotation effects - optimized spin speed
+    const spinMultiplier = isPlayerOutsideRing ? 1.5 : 1; // Reduced spin multiplier
+    this.ringGroup.rotation.y += this.config.ringSpinSpeed * 2 * spinMultiplier; // Reduced base speed
+    this.innerRingGroup.rotation.y -= this.config.ringSpinSpeed * 1.5 * spinMultiplier;
   }
 
   public reset(): void {
