@@ -357,8 +357,8 @@ const Game3D: React.FC<Game3DProps> = ({
                 brakeEnergy <= 0 ? 'brake-depleted' :
                 (gameEngineRef.current?.getBikeState().brakeRechargeDelay || 0) > 0 ? 'brake-recharging' : 'brake-available'
               }`}
-              style={{ '--brake-width': `${Math.max(brakeEnergy, 0)}%` } as React.CSSProperties}
-            />
+               style={{ width: `${Math.max(brakeEnergy, 0)}%` }}
+             />
           </div>
           <div className="brake-meter-text text-center">
             BRAKE
