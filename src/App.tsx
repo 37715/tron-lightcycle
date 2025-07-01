@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import MainMenu from './components/MainMenu';
 import Tutorial from './components/Tutorial';
 import Settings from './components/Settings';
@@ -8,22 +8,6 @@ type AppState = 'menu' | 'tutorial' | 'settings' | 'practice' | 'paused' | 'game
 
 function App() {
   const [currentState, setCurrentState] = useState<AppState>('menu');
-  const [keyBinds, setKeyBinds] = useState<{ turnLeft: string[]; turnRight: string[] }>({
-    turnLeft: ['z', 'arrowleft'],
-    turnRight: ['x', 'arrowright']
-  });
-
-  // Load keybinds from localStorage on mount and when Settings changes them
-  useEffect(() => {
-    const saved = localStorage.getItem('hypoxia-keybinds');
-    if (saved) {
-      try {
-        setKeyBinds(JSON.parse(saved));
-      } catch {
-        // ignore
-      }
-    }
-  }, [currentState === 'settings' || currentState === 'paused' || currentState === 'gameOverSettings']); // reload when menu open/close
 
   const handleStartPractice = () => {
     setCurrentState('practice');
@@ -83,13 +67,13 @@ function App() {
       {/* Game Practice + Pause Overlay (no separate 'inGameSettings' state) */}
       {(currentState === 'practice' || currentState === 'paused' || currentState === 'gameOverSettings') && (
         <div className="relative w-full h-screen">
+          {/* Game3D is always mounted, we just pass isPaused if we're showing an overlay */}
           <Game3D
             onSettings={handlePauseOverlay} // ESC just toggles local pause now
             onGameOver={handleShowGameOverSettings}
             onResume={handleBackToPractice}
             // Pause the game only when we're in "paused" or "gameOverSettings"
             isPaused={currentState === 'paused' || currentState === 'gameOverSettings'}
-            keyBinds={keyBinds}
           />
 
           {/* If we're in paused, show the overlay */}

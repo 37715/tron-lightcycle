@@ -12,6 +12,9 @@ export interface BikeState {
   grindOffset: number;
   grindNormal: THREE.Vector3 | null;
   graceFramesRemaining: number; // Grace period protection
+  brakeEnergy: number; // Brake energy (0-100)
+  brakeRechargeDelay: number; // Frames to wait before recharging
+  isBraking: boolean; // Currently braking
 }
 
 export interface GameConfig {
@@ -39,6 +42,13 @@ export interface GameConfig {
   
   // Grace period system
   graceFrames: number;
+  
+  // Brake system
+  brakeMaxEnergy: number;
+  brakeDepletionRate: number;
+  brakeRechargeRate: number;
+  brakeRechargeDelayFrames: number;
+  brakeSpeedReduction: number;
 }
 
 export interface CollisionResult {

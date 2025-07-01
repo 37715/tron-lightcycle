@@ -13,8 +13,7 @@ interface Game3DProps {
   onGameOver?: () => void;
   onResume?: () => void;
   shouldResume?: boolean;
-  isPaused?: boolean;
-  keyBinds?: { turnLeft: string[]; turnRight: string[] }; // <-- add this
+  isPaused?: boolean; // ← New prop to indicate pause state
 }
 
 const Game3D: React.FC<Game3DProps> = ({
@@ -22,8 +21,7 @@ const Game3D: React.FC<Game3DProps> = ({
   onGameOver,
   onResume,
   shouldResume,
-  isPaused = false,
-  keyBinds = { turnLeft: ['z', 'arrowleft'], turnRight: ['x', 'arrowright'] }
+  isPaused = false // Default to false
 }) => {
   const mountRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene>();
@@ -40,6 +38,7 @@ const Game3D: React.FC<Game3DProps> = ({
   
   const [gameState, setGameState] = useState<GameState>('playing'); // Start directly in playing state
   const [bikeHealth, setBikeHealth] = useState(100);
+  const [brakeEnergy, setBrakeEnergy] = useState(100);
   const [countdown, setCountdown] = useState<number | null>(null);
 
   const initScene = useCallback(() => {
@@ -102,6 +101,12 @@ const Game3D: React.FC<Game3DProps> = ({
       if (Math.abs(bikeHealth - healthPercentage) > 0.1) {
         setBikeHealth(healthPercentage);
       }
+      
+      // Also sync brake energy - update more frequently for smooth UI
+      const actualBrakeEnergy = gameEngineRef.current.getBikeState().brakeEnergy;
+      if (Math.abs(brakeEnergy - actualBrakeEnergy) > 0.05) {
+        setBrakeEnergy(actualBrakeEnergy);
+      }
 
       const bikeState = gameEngineRef.current.getBikeState();
       const arena = gameEngineRef.current.getArena();
@@ -151,7 +156,6 @@ const Game3D: React.FC<Game3DProps> = ({
       // Check if bike died
       if (!bikeState.alive && gameState === 'playing') {
         setGameState('gameOver');
-        setIsPaused(true);
         if (onGameOver) {
           onGameOver();
         }
@@ -160,68 +164,93 @@ const Game3D: React.FC<Game3DProps> = ({
 
     rendererRef.current.render(sceneRef.current, cameraRef.current);
     animationIdRef.current = requestAnimationFrame(animate);
-  }, [gameState, bikeHealth, isPaused, countdown, onGameOver]);
+  }, [gameState, bikeHealth, brakeEnergy, isPaused, countdown, onGameOver]);
 
   const handleKeyDown = useCallback((event: KeyboardEvent) => {
     if (!gameEngineRef.current) return;
+    
     const key = event.key.toLowerCase();
+    console.log('Key pressed:', key, 'code:', event.code); // Debug all key presses
+    
+    // Load keybinds from localStorage
+    let keyBinds = {
+      turnLeft: ['z', 'arrowleft'],
+      turnRight: ['x', 'arrowright'],
+      brake: ['space']
+    };
+    
+    try {
+      const saved = localStorage.getItem('hypoxia-keybinds');
+      if (saved) {
+        const parsedBinds = JSON.parse(saved);
+        // Ensure brake property exists (for backward compatibility)
+        keyBinds = {
+          turnLeft: parsedBinds.turnLeft || ['z', 'arrowleft'],
+          turnRight: parsedBinds.turnRight || ['x', 'arrowright'],
+          brake: parsedBinds.brake || ['space']
+        };
+      }
+    } catch {
+      // Use defaults
+    }
+    
     if (key === 'escape' && onSettings) {
+      // Instead of setting local isPaused, just call onSettings
       onSettings();
       event.preventDefault();
-    } else if (keyBinds.turnLeft.includes(key)) {
-      if (!isPaused && countdown === null) {
-        gameEngineRef.current.queueTurn('left');
-      }
+    } else if (keyBinds.turnLeft.includes(key) && !isPaused && countdown === null) {
+      gameEngineRef.current.queueTurn('left');
       event.preventDefault();
-    } else if (keyBinds.turnRight.includes(key)) {
-      if (!isPaused && countdown === null) {
-        gameEngineRef.current.queueTurn('right');
-      }
+    } else if (keyBinds.turnRight.includes(key) && !isPaused && countdown === null) {
+      gameEngineRef.current.queueTurn('right');
+      event.preventDefault();
+    } else if (keyBinds.brake.includes(key === ' ' ? 'space' : key) && !isPaused && countdown === null) {
+      console.log('Brake key pressed:', key, 'mapped to:', key === ' ' ? 'space' : key, 'Brake binds:', keyBinds.brake, 'Current brake energy:', gameEngineRef.current?.getBikeState().brakeEnergy);
+      gameEngineRef.current.setBraking(true);
       event.preventDefault();
     }
-  }, [onSettings, isPaused, countdown, keyBinds]);
+  }, [onSettings, isPaused, countdown]);
 
   const handleKeyUp = useCallback((event: KeyboardEvent) => {
+    if (!gameEngineRef.current) return;
+    
     const key = event.key.toLowerCase();
-    if (
-      keyBinds.turnLeft.includes(key) ||
-      keyBinds.turnRight.includes(key)
-    ) {
-      event.preventDefault();
+    
+    // Load keybinds from localStorage
+    let keyBinds = {
+      turnLeft: ['z', 'arrowleft'],
+      turnRight: ['x', 'arrowright'],
+      brake: ['space']
+    };
+    
+    try {
+      const saved = localStorage.getItem('hypoxia-keybinds');
+      if (saved) {
+        const parsedBinds = JSON.parse(saved);
+        // Ensure brake property exists (for backward compatibility)
+        keyBinds = {
+          turnLeft: parsedBinds.turnLeft || ['z', 'arrowleft'],
+          turnRight: parsedBinds.turnRight || ['x', 'arrowright'],
+          brake: parsedBinds.brake || ['space']
+        };
+      }
+    } catch {
+      // Use defaults
     }
-  }, [keyBinds]);
-
-  const startCountdown = useCallback(() => {
-    setCountdown(3);
-    const countdownInterval = setInterval(() => {
-      setCountdown(prev => {
-        if (prev === null || prev <= 1) {
-          clearInterval(countdownInterval);
-          return null;
-        }
-        return prev - 1;
-      });
-    }, 1000);
+    
+    if (keyBinds.turnLeft.includes(key) || keyBinds.turnRight.includes(key) || 
+        keyBinds.brake.includes(key === ' ' ? 'space' : key)) {
+      event.preventDefault();
+      
+      // Stop braking on key release
+      if (keyBinds.brake.includes(key === ' ' ? 'space' : key)) {
+        console.log('Brake key released:', key, 'mapped to:', key === ' ' ? 'space' : key, 'Current brake energy:', gameEngineRef.current?.getBikeState().brakeEnergy);
+        gameEngineRef.current.setBraking(false);
+      }
+    }
   }, []);
 
-  const startGame = useCallback(() => {
-    if (!gameEngineRef.current || !trailRendererRef.current || 
-        !arenaRendererRef.current || !cameraControllerRef.current) return;
-
-    // Reset all systems
-    gameEngineRef.current.reset();
-    trailRendererRef.current.reset();
-    arenaRendererRef.current.reset();
-    cameraControllerRef.current.reset();
-
-    setBikeHealth(100);
-    setGameState('playing');
-    setIsPaused(false);
-    startCountdown();
-  }, [startCountdown]);
-
   const resumeGame = useCallback(() => {
-    setIsPaused(false);
     if (onResume) {
       onResume();
     }
@@ -297,9 +326,12 @@ const Game3D: React.FC<Game3DProps> = ({
       <div className="absolute top-4 left-4 text-white z-10">
         <h1 className="text-2xl font-bold text-blue-400 mb-2 ui-text">hypoxia</h1>
         <div className="text-sm text-gray-300 ui-text">
-          <p>Z/← Turn Left | X/→ Turn Right</p>
+          <p>Z/← Turn Left | X/→ Turn Right | Space Brake</p>
           <p>Avoid walls and your own trail!</p>
           <p className="text-xs opacity-50 mt-1">Press ESC to open menu</p>
+          {gameEngineRef.current?.getBikeState().isBraking && (
+            <p className="text-yellow-400 font-bold">🛑 BRAKING ACTIVE</p>
+          )}
           {gameState === 'playing' && gameEngineRef.current && trailRendererRef.current && (
             <div className="mt-2 text-xs opacity-60">
               <p>Trail Points: {gameEngineRef.current.getTrailLength()}</p>
@@ -315,25 +347,40 @@ const Game3D: React.FC<Game3DProps> = ({
         </div>
       </div>
 
-      {/* Health Bar */}
+      {/* Health Bar and Brake Meter */}
       {gameState === 'playing' && (
         <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 z-10">
+          {/* Brake Meter */}
+          <div className="brake-meter-container">
+            <div
+              className={`brake-meter-fill brake-meter-width ${
+                brakeEnergy <= 0 ? 'brake-depleted' :
+                (gameEngineRef.current?.getBikeState().brakeRechargeDelay || 0) > 0 ? 'brake-recharging' : 'brake-available'
+              }`}
+              style={{ '--brake-width': `${Math.max(brakeEnergy, 0)}%` } as React.CSSProperties}
+            />
+          </div>
+          <div className="brake-meter-text text-center">
+            BRAKE
+          </div>
+          
+          {/* Health Bar */}
           <div className="health-bar-container">
             <div
-              className={`health-bar-fill ${
+              className={`health-bar-fill health-bar-width ${
                 (gameEngineRef.current && gameEngineRef.current.getBikeState().graceFramesRemaining > 0) ? 'health-grace' :
                 bikeHealth > 60 ? 'health-high' : 
                 bikeHealth > 30 ? 'health-medium' : 
                 bikeHealth > 15 ? 'health-low' : 'health-critical'
               }`}
-              style={{ width: `${Math.max(bikeHealth, 0)}%` }}
+              style={{ '--health-width': `${Math.max(bikeHealth, 0)}%` } as React.CSSProperties}
             />
           </div>
           <div className="health-bar-text text-center">
             {(gameEngineRef.current && gameEngineRef.current.getBikeState().graceFramesRemaining > 0) ? (
-              <>GRACE PERIOD {Math.round(Math.max(bikeHealth, 0))}%</>
+              <>GRACE PERIOD</>
             ) : (
-              <>HEALTH {Math.round(Math.max(bikeHealth, 0))}%</>
+              <>HEALTH</>
             )}
           </div>
         </div>

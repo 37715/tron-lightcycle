@@ -35,7 +35,10 @@ export class GameEngine {
       maxHealth: 156,
       grindOffset: 0,
       grindNormal: null,
-      graceFramesRemaining: 0
+      graceFramesRemaining: 0,
+      brakeEnergy: this.config.brakeMaxEnergy,
+      brakeRechargeDelay: 0,
+      isBraking: false
     };
   }
 
@@ -55,12 +58,56 @@ export class GameEngine {
     this.turnQueue.push(direction);
   }
 
+  public setBraking(isBraking: boolean): void {
+    this.bikeState.isBraking = isBraking;
+  }
+
+  private updateBrakeSystem(): void {
+    if (this.bikeState.isBraking && this.bikeState.brakeEnergy > 0) {
+      // Deplete brake energy while braking
+      this.bikeState.brakeEnergy = Math.max(0, this.bikeState.brakeEnergy - this.config.brakeDepletionRate);
+      this.bikeState.brakeRechargeDelay = this.config.brakeRechargeDelayFrames;
+      
+      // Debug log every 60 frames (1 second) while braking
+      if (this.frameCount % 60 === 0) {
+        const energyUsed = this.config.brakeMaxEnergy - this.bikeState.brakeEnergy;
+        const brakeProgress = energyUsed / this.config.brakeMaxEnergy;
+        console.log(`Braking: Energy ${this.bikeState.brakeEnergy.toFixed(1)}/100 (${(brakeProgress * 100).toFixed(1)}% used), Progressive braking active`);
+      }
+    } else {
+      // Stop braking if no energy
+      if (this.bikeState.brakeEnergy <= 0) {
+        this.bikeState.isBraking = false;
+      }
+      
+      // Handle recharge delay
+      if (this.bikeState.brakeRechargeDelay > 0) {
+        this.bikeState.brakeRechargeDelay--;
+      } else {
+        // Recharge brake energy
+        const oldEnergy = this.bikeState.brakeEnergy;
+        this.bikeState.brakeEnergy = Math.min(
+          this.config.brakeMaxEnergy, 
+          this.bikeState.brakeEnergy + this.config.brakeRechargeRate
+        );
+        
+        // Debug log when recharging starts or when fully recharged
+        if (oldEnergy < this.config.brakeMaxEnergy && this.bikeState.brakeEnergy === this.config.brakeMaxEnergy) {
+          console.log(`Brake fully recharged: ${this.bikeState.brakeEnergy}%`);
+        }
+      }
+    }
+  }
+
   public update(): { healthChanged: boolean; newHealth: number } {
     this.frameCount++;
     
     if (!this.bikeState.alive) {
       return { healthChanged: false, newHealth: this.bikeState.health };
     }
+
+    // Update brake system
+    this.updateBrakeSystem();
 
     // Handle turns
     const framesSinceLastTurn = this.frameCount - this.bikeState.lastTurnFrame;
@@ -91,8 +138,26 @@ export class GameEngine {
       0,
       Math.cos(this.bikeState.rotation)
     );
+    
+    // Apply progressive brake speed reduction if braking
+    let currentSpeed = this.bikeState.speed;
+    if (this.bikeState.isBraking && this.bikeState.brakeEnergy > 0) {
+      // Progressive braking: speed reduction is proportional to energy used
+      const energyUsed = this.config.brakeMaxEnergy - this.bikeState.brakeEnergy;
+      const brakeProgress = energyUsed / this.config.brakeMaxEnergy; // 0 to 1
+      
+      // Speed reduction goes from 1.0 (no reduction) to brakeSpeedReduction (max reduction)
+      const speedMultiplier = 1.0 - (brakeProgress * (1.0 - this.config.brakeSpeedReduction));
+      currentSpeed *= speedMultiplier;
+      
+      // Debug log speed reduction every 30 frames while braking
+      if (this.frameCount % 30 === 0) {
+        console.log(`Progressive braking: Energy ${this.bikeState.brakeEnergy.toFixed(1)}/100, Progress ${(brakeProgress * 100).toFixed(1)}%, Speed ${(speedMultiplier * 100).toFixed(1)}%`);
+      }
+    }
+    
     const potentialPosition = this.bikeState.position.clone().add(
-      direction.multiplyScalar(this.bikeState.speed)
+      direction.multiplyScalar(currentSpeed)
     );
 
     // Check collisions

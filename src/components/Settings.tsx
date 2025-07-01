@@ -13,22 +13,31 @@ type SettingsView = 'main' | 'binds' | 'visuals';
 interface KeyBinds {
   turnLeft: string[];
   turnRight: string[];
+  brake: string[];
 }
 
 const Settings: React.FC<SettingsProps> = ({ onBack, onLeaveGame, onRestartGame, isInGame = false, isGameOver = false }) => {
   const [currentView, setCurrentView] = useState<SettingsView>('main');
   const [keyBinds, setKeyBinds] = useState<KeyBinds>({
     turnLeft: ['z', 'arrowleft'],
-    turnRight: ['x', 'arrowright']
+    turnRight: ['x', 'arrowright'],
+    brake: ['space']
   });
-  const [selectedBind, setSelectedBind] = useState<'turnLeft' | 'turnRight' | null>(null);
+  const [selectedBind, setSelectedBind] = useState<'turnLeft' | 'turnRight' | 'brake' | null>(null);
 
   // Load saved keybinds from localStorage
   useEffect(() => {
     const saved = localStorage.getItem('hypoxia-keybinds');
     if (saved) {
       try {
-        setKeyBinds(JSON.parse(saved));
+        const parsedBinds = JSON.parse(saved);
+        // Ensure brake property exists (for backward compatibility)
+        const completeBinds = {
+          turnLeft: parsedBinds.turnLeft || ['z', 'arrowleft'],
+          turnRight: parsedBinds.turnRight || ['x', 'arrowright'],
+          brake: parsedBinds.brake || ['space']
+        };
+        setKeyBinds(completeBinds);
       } catch {
         console.warn('Failed to load saved keybinds');
       }
@@ -47,7 +56,12 @@ const Settings: React.FC<SettingsProps> = ({ onBack, onLeaveGame, onRestartGame,
 
     const handleKeyPress = (event: KeyboardEvent) => {
       event.preventDefault();
-      const key = event.key.toLowerCase();
+      let key = event.key.toLowerCase();
+      
+      // Convert space character to 'space' string
+      if (key === ' ') {
+        key = 'space';
+      }
       
       // Don't allow escape
       if (key === 'escape') {
@@ -209,6 +223,23 @@ const Settings: React.FC<SettingsProps> = ({ onBack, onLeaveGame, onRestartGame,
             ))}
           </div>
           {selectedBind === 'turnRight' && (
+            <div className="keybind-prompt ui-text">Press a key to bind or remove...</div>
+          )}
+        </div>
+        
+        <div 
+          className={`keybind-box ${selectedBind === 'brake' ? 'keybind-selected' : ''}`}
+          onClick={() => setSelectedBind('brake')}
+        >
+          <div className="keybind-label ui-text">BRAKE</div>
+          <div className="keybind-keys">
+            {keyBinds.brake.map((key, index) => (
+              <div key={index} className="keybind-key ui-text">
+                {key === 'space' ? 'SPACE' : key.toUpperCase()}
+              </div>
+            ))}
+          </div>
+          {selectedBind === 'brake' && (
             <div className="keybind-prompt ui-text">Press a key to bind or remove...</div>
           )}
         </div>
