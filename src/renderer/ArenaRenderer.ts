@@ -4,6 +4,7 @@ import { GameConfig } from '../engine/types';
 export class ArenaRenderer {
   private ringGroup: THREE.Group;
   private innerRingGroup: THREE.Group;
+  private gridHelper: THREE.GridHelper | null = null;
 
   constructor(private scene: THREE.Scene, private config: GameConfig) {
     this.ringGroup = this.createRingGroup();
@@ -109,13 +110,6 @@ export class ArenaRenderer {
   private createGrid(): void {
     const gridSize = 200;
     const gridDivisions = 40;
-    const gridColor = new THREE.Color(0x222222); // Use a lighter gray for subtlety
-    const gridMaterial = new THREE.LineBasicMaterial({
-      color: gridColor,
-      opacity: 0.15, // Lower opacity for subtle effect
-      transparent: true,
-      depthWrite: false
-    });
     
     const gridHelper = new THREE.GridHelper(
       gridSize, gridDivisions,
@@ -127,6 +121,7 @@ export class ArenaRenderer {
     (gridHelper.material as THREE.Material).depthWrite = false;
     gridHelper.position.y = -0.5;
     this.scene.add(gridHelper);
+    this.gridHelper = gridHelper; // Track the gridHelper object
   }
 
   public updateRings(scale: number, frameCount: number, isPlayerOutsideRing: boolean): void {
@@ -198,5 +193,14 @@ export class ArenaRenderer {
         material.color.setHex(0x330000);
       }
     });
+  }
+
+  public setGridVisible(visible: boolean): void {
+    if (this.gridHelper) {
+      this.gridHelper.visible = visible;
+      console.log(`Grid visibility set to: ${visible}`);
+    } else {
+      console.warn('Grid helper not available when trying to set visibility');
+    }
   }
 }

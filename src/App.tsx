@@ -6,8 +6,19 @@ import Game3D from './components/Game3D';
 
 type AppState = 'menu' | 'tutorial' | 'settings' | 'practice' | 'paused' | 'gameOverSettings';
 
+interface VisualSettings {
+  fov: number;
+  showGrid: boolean;
+  cameraTurnSpeed: number;
+}
+
 function App() {
   const [currentState, setCurrentState] = useState<AppState>('menu');
+  const [visualSettings, setVisualSettings] = useState<VisualSettings>({
+    fov: 75,
+    showGrid: true,
+    cameraTurnSpeed: 0.5
+  });
 
   const handleStartPractice = () => {
     setCurrentState('practice');
@@ -61,7 +72,10 @@ function App() {
 
       {/* Settings (Global) */}
       {currentState === 'settings' && (
-        <Settings onBack={handleBackToMenu} />
+        <Settings 
+          onBack={handleBackToMenu} 
+          onVisualSettingsChange={setVisualSettings}
+        />
       )}
 
       {/* Game Practice + Pause Overlay (no separate 'inGameSettings' state) */}
@@ -74,6 +88,7 @@ function App() {
             onResume={handleBackToPractice}
             // Pause the game only when we're in "paused" or "gameOverSettings"
             isPaused={currentState === 'paused' || currentState === 'gameOverSettings'}
+            visualSettings={visualSettings}
           />
 
           {/* If we're in paused, show the overlay */}
@@ -85,6 +100,7 @@ function App() {
                 onRestartGame={handleRestartGame}
                 isInGame={true}
                 isGameOver={false}
+                onVisualSettingsChange={setVisualSettings}
               />
             </div>
           )}
@@ -98,6 +114,7 @@ function App() {
                 onRestartGame={handleRestartGame}
                 isInGame={true}
                 isGameOver={true}
+                onVisualSettingsChange={setVisualSettings}
               />
             </div>
           )}

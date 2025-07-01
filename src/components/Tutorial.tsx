@@ -17,16 +17,6 @@ const Tutorial: React.FC<TutorialProps> = ({ onBack }) => {
       <div className="tutorial-content">
         <div className="tutorial-header">
           <h1 className="tutorial-title ui-text">TUTORIAL</h1>
-          <button 
-            className="menu-button menu-button-secondary ui-text"
-            onClick={onBack}
-            style={{ width: '120px', height: '50px' }}
-          >
-            <span className="button-content">
-              <span className="button-icon">←</span>
-              <span className="button-text">BACK</span>
-            </span>
-          </button>
         </div>
         
         <div className="tutorial-sections">

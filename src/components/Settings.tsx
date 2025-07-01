@@ -6,6 +6,13 @@ interface SettingsProps {
   onRestartGame?: () => void;
   isInGame?: boolean;
   isGameOver?: boolean;
+  onVisualSettingsChange?: (settings: VisualSettings) => void;
+}
+
+interface VisualSettings {
+  fov: number;
+  showGrid: boolean;
+  cameraTurnSpeed: number;
 }
 
 type SettingsView = 'main' | 'binds' | 'visuals';
@@ -16,7 +23,7 @@ interface KeyBinds {
   brake: string[];
 }
 
-const Settings: React.FC<SettingsProps> = ({ onBack, onLeaveGame, onRestartGame, isInGame = false, isGameOver = false }) => {
+const Settings: React.FC<SettingsProps> = ({ onBack, onLeaveGame, onRestartGame, isInGame = false, isGameOver = false, onVisualSettingsChange }) => {
   const [currentView, setCurrentView] = useState<SettingsView>('main');
   const [keyBinds, setKeyBinds] = useState<KeyBinds>({
     turnLeft: ['z', 'arrowleft'],
@@ -24,6 +31,13 @@ const Settings: React.FC<SettingsProps> = ({ onBack, onLeaveGame, onRestartGame,
     brake: ['space']
   });
   const [selectedBind, setSelectedBind] = useState<'turnLeft' | 'turnRight' | 'brake' | null>(null);
+  
+  // Visual settings state
+  const [visualSettings, setVisualSettings] = useState<VisualSettings>({
+    fov: 75,
+    showGrid: true,
+    cameraTurnSpeed: 0.5 // Default medium speed
+  });
 
   // Load saved keybinds from localStorage
   useEffect(() => {
@@ -88,6 +102,33 @@ const Settings: React.FC<SettingsProps> = ({ onBack, onLeaveGame, onRestartGame,
     return () => window.removeEventListener('keydown', handleKeyPress);
   }, [selectedBind, keyBinds]);
 
+  // Load saved visual settings from localStorage
+  useEffect(() => {
+    const savedVisuals = localStorage.getItem('hypoxia-visual-settings');
+    if (savedVisuals) {
+      try {
+        const parsedVisuals = JSON.parse(savedVisuals);
+        const completeVisuals = {
+          fov: parsedVisuals.fov || 75,
+          showGrid: parsedVisuals.showGrid !== undefined ? parsedVisuals.showGrid : true,
+          cameraTurnSpeed: parsedVisuals.cameraTurnSpeed !== undefined ? parsedVisuals.cameraTurnSpeed : 0.5
+        };
+        setVisualSettings(completeVisuals);
+        onVisualSettingsChange?.(completeVisuals);
+      } catch {
+        console.warn('Failed to load saved visual settings');
+      }
+    }
+  }, [onVisualSettingsChange]);
+
+  // Save visual settings and notify parent
+  const updateVisualSettings = (newSettings: Partial<VisualSettings>) => {
+    const updatedSettings = { ...visualSettings, ...newSettings };
+    setVisualSettings(updatedSettings);
+    localStorage.setItem('hypoxia-visual-settings', JSON.stringify(updatedSettings));
+    onVisualSettingsChange?.(updatedSettings);
+  };
+
   const renderMainSettings = () => (
     <div className="settings-content">
       <div className="settings-header">
@@ -145,7 +186,6 @@ const Settings: React.FC<SettingsProps> = ({ onBack, onLeaveGame, onRestartGame,
                 <span className="button-icon">👁</span>
                 <span className="button-text">VISUALS</span>
               </span>
-              <span className="button-coming-soon">COMING SOON</span>
             </button>
           </>
         )}
@@ -253,8 +293,8 @@ const Settings: React.FC<SettingsProps> = ({ onBack, onLeaveGame, onRestartGame,
   );
 
   const renderVisuals = () => (
-    <div className="settings-content">
-      <div className="settings-header">
+    <div className="visual-content">
+      <div className="visual-header">
         <h1 className="settings-title ui-text">VISUALS</h1>
         <button 
           className="menu-button menu-button-secondary menu-button-small ui-text"
@@ -267,9 +307,65 @@ const Settings: React.FC<SettingsProps> = ({ onBack, onLeaveGame, onRestartGame,
         </button>
       </div>
       
-      <div className="coming-soon-message">
-        <h2 className="ui-text">Visual settings coming soon!</h2>
-        <p className="ui-text">Trail colors, UI themes, and more...</p>
+      <div className="visual-settings">
+        {/* FOV Slider */}
+        <div className="visual-setting-box">
+          <div className="setting-label ui-text">field of view</div>
+          <div className="setting-value ui-text">{visualSettings.fov}°</div>
+          <input
+            type="range"
+            min="45"
+            max="120"
+            value={visualSettings.fov}
+            onChange={(e) => updateVisualSettings({ fov: parseInt(e.target.value) })}
+            className="setting-slider"
+            title="Field of View"
+          />
+          <div className="setting-range ui-text">45° - 120°</div>
+        </div>
+
+        {/* Camera Turn Speed Slider */}
+        <div className="visual-setting-box">
+          <div className="setting-label ui-text">camera turn speed</div>
+          <div className="setting-value ui-text">
+            {visualSettings.cameraTurnSpeed < 0.3 ? 'snappy' : 
+             visualSettings.cameraTurnSpeed > 0.7 ? 'smooth' : 'balanced'}
+          </div>
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.1"
+            value={visualSettings.cameraTurnSpeed}
+            onChange={(e) => updateVisualSettings({ cameraTurnSpeed: parseFloat(e.target.value) })}
+            className="setting-slider"
+            title="Camera Turn Speed"
+          />
+          <div className="setting-range ui-text">snappy ← → smooth</div>
+        </div>
+
+        {/* Grid Toggle */}
+        <div className="visual-setting-box">
+          <div className="setting-label ui-text">floor grid</div>
+          <button
+            className={`setting-toggle-wacky ${visualSettings.showGrid ? 'toggle-on' : 'toggle-off'}`}
+            onClick={() => updateVisualSettings({ showGrid: !visualSettings.showGrid })}
+          >
+            <div className="toggle-icon">
+              {visualSettings.showGrid ? '🔳' : '⬛'}
+            </div>
+            <div className="toggle-bg"></div>
+            <div className="toggle-label ui-text">
+              {visualSettings.showGrid ? 'visible' : 'hidden'}
+            </div>
+          </button>
+        </div>
+
+        <div className="setting-description ui-text">
+          <p>fine-tune your visual experience</p>
+          <p>camera sensitivity controls view smoothness</p>
+          <p>preferences save automatically</p>
+        </div>
       </div>
     </div>
   );

@@ -185,9 +185,11 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   height: 100vh;
   padding: 2rem;
+  overflow-y: auto;
+  padding-top: 1rem;
 }
 
 .logo-section {
@@ -353,6 +355,29 @@
   transform: scale(1.15);
 }
 
+/* Casual and Competitive button styles */
+.menu-button-casual {
+  background: linear-gradient(135deg, #36d1dc 0%, #5b86e5 100%);
+  border-color: rgba(54, 209, 220, 0.3);
+}
+
+.menu-button-casual:hover:not(:disabled) {
+  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+  box-shadow: 0 15px 35px rgba(54, 209, 220, 0.4);
+  transform: scale(1.15);
+}
+
+.menu-button-competitive {
+  background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+  border-color: rgba(250, 112, 154, 0.3);
+}
+
+.menu-button-competitive:hover:not(:disabled) {
+  background: linear-gradient(135deg, #ff6b6b 0%, #feca57 100%);
+  box-shadow: 0 15px 35px rgba(250, 112, 154, 0.4);
+  transform: scale(1.15);
+}
+
 .button-content {
   display: flex;
   align-items: center;
@@ -474,10 +499,17 @@
 }
 
 .tutorial-title {
-  font-size: 3rem;
+  font-size: 2rem;
   font-weight: bold;
   color: #3a7bd5;
-  margin: 0;
+  margin: 0 0 1rem 0;
+}
+
+.tutorial-header {
+  text-align: center;
+  width: 100%;
+  max-width: 900px;
+  margin-bottom: 1rem;
 }
 
 .back-button {
@@ -516,17 +548,17 @@
 
 .tutorial-sections {
   display: grid;
-  gap: 2rem;
+  gap: 1.5rem;
   width: 100%;
-  max-width: 1000px;
-  margin-bottom: 2rem;
+  max-width: 900px;
+  margin-bottom: 1.5rem;
 }
 
 .tutorial-section {
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 12px;
-  padding: 1.5rem;
+  padding: 1rem;
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
 }
@@ -595,33 +627,35 @@
 
 .mechanics-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.8rem;
 }
 
 .mechanic-item {
-  padding: 1rem;
+  padding: 0.8rem;
   background: rgba(0, 0, 0, 0.05);
   border-radius: 8px;
   border-left: 4px solid #3a7bd5;
 }
 
 .mechanic-title {
-  font-size: 1rem;
+  font-size: 0.9rem;
   color: #3a7bd5;
-  margin: 0 0 0.5rem 0;
+  margin: 0 0 0.3rem 0;
   letter-spacing: 0.05em;
 }
 
 .mechanic-desc {
   color: #666;
-  font-size: 0.9rem;
-  line-height: 1.4;
+  font-size: 0.8rem;
+  line-height: 1.3;
   margin: 0;
 }
 
 .tutorial-footer {
   margin-top: 1rem;
+  padding-bottom: 2rem;
+  text-align: center;
 }
 
 /* App Container */
@@ -639,7 +673,7 @@
   width: 100vw;
   height: 100vh;
   overflow: hidden;
-  background: #f0f0f0;
+  background: #0a0a0a; /* Dark background for consistency */
 }
 
 .settings-container.in-game-overlay {
@@ -648,7 +682,7 @@
   backdrop-filter: blur(2px);
 }
 
-.settings-content, .keybinds-content {
+.settings-content, .keybinds-content, .visual-content {
   position: relative;
   z-index: 10;
   display: flex;
@@ -660,7 +694,8 @@
 }
 
 .settings-container.in-game-overlay .settings-content,
-.settings-container.in-game-overlay .keybinds-content {
+.settings-container.in-game-overlay .keybinds-content,
+.settings-container.in-game-overlay .visual-content {
   background: rgba(0, 0, 0, 0.3);
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
@@ -668,13 +703,13 @@
   border: 2px solid rgba(255, 255, 255, 0.1);
 }
 
-.settings-header, .keybinds-header {
+.settings-header, .keybinds-header, .visual-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   width: 100%;
   max-width: 800px;
-  margin-bottom: 3rem;
+  margin-bottom: 1.5rem;
 }
 
 .settings-title {
@@ -1351,4 +1386,245 @@
   margin-top: 0.5rem;
   padding: 0.75rem 1.5rem;
   transform: rotate(-1deg);
+}
+
+/* Visual Settings Styles */
+.visual-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 1rem;
+  max-width: 600px;
+  margin: 0 auto;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.visual-setting-box {
+  background: rgba(255, 255, 255, 0.05);
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 1rem;
+  transition: all 0.3s ease;
+}
+
+.visual-setting-box:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.setting-label {
+  font-size: 1rem;
+  font-weight: bold;
+  margin-bottom: 0.3rem;
+  color: #fff;
+  text-transform: lowercase;
+  letter-spacing: 1px;
+}
+
+.setting-value {
+  font-size: 1.2rem;
+  color: #4A90E2;
+  font-weight: bold;
+  margin-bottom: 0.5rem;
+  text-align: center;
+}
+
+.setting-slider {
+  width: 100%;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+  margin-bottom: 0.3rem;
+}
+
+.setting-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  background: linear-gradient(135deg, #4A90E2, #50E3C2);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.setting-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+  box-shadow: 0 0 15px rgba(74, 144, 226, 0.6);
+}
+
+.setting-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  background: linear-gradient(135deg, #4A90E2, #50E3C2);
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+  transition: all 0.2s ease;
+}
+
+.setting-range {
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.6);
+  text-align: center;
+}
+
+/* Wacky Artistic Toggle Button */
+.setting-toggle-wacky {
+  position: relative;
+  width: 120px;
+  height: 50px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  transform: rotate(-2deg);
+  margin: 0.5rem auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.setting-toggle-wacky:hover {
+  transform: rotate(0deg) scale(1.05);
+}
+
+.toggle-bg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, #2a2a2a, #1a1a1a);
+  border: 3px solid #444;
+  clip-path: polygon(15px 0%, 100% 5px, 85% 100%, 0% 95%);
+  transition: all 0.3s ease;
+  z-index: 1;
+}
+
+.setting-toggle-wacky.toggle-on .toggle-bg {
+  background: linear-gradient(135deg, #4A90E2, #50E3C2);
+  border-color: #4A90E2;
+  box-shadow: 
+    0 0 20px rgba(74, 144, 226, 0.5),
+    inset 0 0 20px rgba(255, 255, 255, 0.1);
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.setting-toggle-wacky.toggle-off .toggle-bg {
+  background: linear-gradient(135deg, #666, #333);
+  border-color: #555;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+}
+
+.toggle-icon {
+  position: relative;
+  z-index: 3;
+  font-size: 1.5rem;
+  margin-right: 0.4rem;
+  animation: float 3s ease-in-out infinite;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
+}
+
+.setting-toggle-wacky.toggle-on .toggle-icon {
+  animation: float 1.5s ease-in-out infinite, glow-pulse 2s ease-in-out infinite;
+}
+
+.toggle-label {
+  position: relative;
+  z-index: 3;
+  font-size: 0.9rem;
+  font-weight: bold;
+  text-transform: lowercase;
+  letter-spacing: 1px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  color: #fff;
+}
+
+.setting-toggle-wacky:active {
+  transform: rotate(-1deg) scale(0.95);
+}
+
+.setting-toggle-wacky:active .toggle-bg {
+  animation: shake 0.5s ease-in-out;
+}
+
+@keyframes glow-pulse {
+  0%, 100% { filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5)); }
+  50% { filter: drop-shadow(0 0 20px rgba(74, 144, 226, 0.8)); }
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-2px) rotate(1deg); }
+  75% { transform: translateX(2px) rotate(-1deg); }
+}
+
+.setting-description {
+  margin-top: 0.5rem;
+  padding: 0.8rem;
+  background: linear-gradient(135deg, 
+    rgba(58, 123, 213, 0.12) 0%, 
+    rgba(58, 123, 213, 0.06) 50%,
+    rgba(100, 150, 255, 0.10) 100%);
+  border-radius: 8px;
+  border: 1px solid rgba(58, 123, 213, 0.2);
+  color: rgba(255, 255, 255, 0.8);
+  text-align: center;
+  font-style: italic;
+  font-size: 0.85rem;
+}
+
+.setting-description p {
+  margin: 0.2rem 0;
+  background: linear-gradient(135deg, #ffffff 0%, #e0e7ff 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Submenu Title Styling */
+.submenu-title {
+  font-size: 2.5rem;
+  font-weight: bold;
+  margin-bottom: 1rem;
+  text-align: center;
+  text-transform: lowercase;
+  letter-spacing: 2px;
+  background: linear-gradient(135deg, #4A90E2, #50E3C2);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  filter: drop-shadow(0 4px 8px rgba(74, 144, 226, 0.3));
+  position: relative;
+}
+
+.submenu-title::after {
+  content: '';
+  position: absolute;
+  bottom: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 60px;
+  height: 3px;
+  background: linear-gradient(135deg, #4A90E2, #50E3C2);
+  border-radius: 2px;
+}
+
+/* Different colors for competitive */
+.submenu-content.competitive .submenu-title {
+  background: linear-gradient(135deg, #fa709a, #fee140);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  filter: drop-shadow(0 4px 8px rgba(250, 112, 154, 0.3));
+}
+
+.submenu-content.competitive .submenu-title::after {
+  background: linear-gradient(135deg, #fa709a, #fee140);
 }

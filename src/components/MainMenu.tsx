@@ -28,18 +28,17 @@ const MainMenu: React.FC<MainMenuProps> = ({ onStartPractice, onTutorial, onSett
         {/* Main Menu Buttons */}
         {view === 'main' && (
           <div className="menu-buttons">
-            <button className="menu-button menu-button-secondary ui-text" onClick={() => setView('casual')}>
+            <button className="menu-button menu-button-casual ui-text" onClick={() => setView('casual')}>
               <span className="button-content">
                 <span className="button-icon">⚡</span>
                 <span className="button-text">CASUAL</span>
               </span>
             </button>
-            <button className="menu-button menu-button-secondary ui-text" onClick={() => setView('competitive')}>
+            <button className="menu-button menu-button-competitive ui-text" onClick={() => setView('competitive')}>
               <span className="button-content">
                 <span className="button-icon">🏆</span>
                 <span className="button-text">COMPETITIVE</span>
               </span>
-              <span className="button-coming-soon">RANKED</span>
             </button>
             <button 
               className="menu-button menu-button-primary ui-text"
@@ -76,8 +75,8 @@ const MainMenu: React.FC<MainMenuProps> = ({ onStartPractice, onTutorial, onSett
         {/* Submenu for Casual and Competitive */}
         {(view === 'casual' || view === 'competitive') && (
           <div className={`submenu-content ${view}`}>
-            <h2 className="menu-title ui-text">
-              {view === 'competitive' ? 'COMPETITIVE • RANKED' : 'CASUAL PLAY'}
+            <h2 className="submenu-title ui-text">
+              {view === 'competitive' ? 'competitive • ranked' : 'casual play'}
             </h2>
             <div className="submenu-grid">
               <div className={`submenu-item ${view}-style one-v-one`} onClick={() => console.log('1v1 selected')}>
@@ -108,8 +107,7 @@ const MainMenu: React.FC<MainMenuProps> = ({ onStartPractice, onTutorial, onSett
         )}
 
          <div className="menu-footer">
-           <p className="ui-text">Use Z/← and X/→ to control your bike</p>
-           <p className="ui-text version-text">v1.0 • Esports Optimized</p>
+           <p className="ui-text version-text">v1.0</p>
          </div>
        </div>
        {/* Floating particles for extra effect */}

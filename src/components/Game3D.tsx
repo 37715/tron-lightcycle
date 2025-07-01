@@ -13,7 +13,12 @@ interface Game3DProps {
   onGameOver?: () => void;
   onResume?: () => void;
   shouldResume?: boolean;
-  isPaused?: boolean; // ← New prop to indicate pause state
+  isPaused?: boolean;
+  visualSettings?: {
+    fov: number;
+    showGrid: boolean;
+    cameraTurnSpeed: number;
+  };
 }
 
 const Game3D: React.FC<Game3DProps> = ({
@@ -21,7 +26,8 @@ const Game3D: React.FC<Game3DProps> = ({
   onGameOver,
   onResume,
   shouldResume,
-  isPaused = false // Default to false
+  isPaused = false,
+  visualSettings = { fov: 75, showGrid: true, cameraTurnSpeed: 0.5 }
 }) => {
   const mountRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene>();
@@ -51,7 +57,7 @@ const Game3D: React.FC<Game3DProps> = ({
 
     // Camera setup
     const camera = new THREE.PerspectiveCamera(
-      75,
+      visualSettings.fov,
       window.innerWidth / window.innerHeight,
       0.1,
       1000
@@ -81,7 +87,11 @@ const Game3D: React.FC<Game3DProps> = ({
     trailRendererRef.current = new TrailRenderer(scene, DEFAULT_CONFIG);
     arenaRendererRef.current = new ArenaRenderer(scene, DEFAULT_CONFIG);
     cameraControllerRef.current = new CameraController(camera);
-  }, []);
+    
+    // Set initial visual settings
+    arenaRendererRef.current.setGridVisible(visualSettings.showGrid);
+    cameraControllerRef.current.setTurnSpeed(visualSettings.cameraTurnSpeed);
+  }, [visualSettings]);
 
   const animate = useCallback(() => {
     if (!rendererRef.current || !sceneRef.current || !cameraRef.current) return;
@@ -317,6 +327,28 @@ const Game3D: React.FC<Game3DProps> = ({
       resumeGame();
     }
   }, [shouldResume, resumeGame]);
+
+  // Update camera FOV when visual settings change
+  useEffect(() => {
+    if (cameraRef.current && visualSettings) {
+      cameraRef.current.fov = visualSettings.fov;
+      cameraRef.current.updateProjectionMatrix();
+    }
+  }, [visualSettings]);
+
+  // Update grid visibility when visual settings change
+  useEffect(() => {
+    if (arenaRendererRef.current && visualSettings) {
+      arenaRendererRef.current.setGridVisible(visualSettings.showGrid);
+    }
+  }, [visualSettings]);
+
+  // Update camera turn speed when visual settings change
+  useEffect(() => {
+    if (cameraControllerRef.current && visualSettings) {
+      cameraControllerRef.current.setTurnSpeed(visualSettings.cameraTurnSpeed);
+    }
+  }, [visualSettings]);
 
   return (
     <div className="relative w-full h-screen overflow-hidden">
