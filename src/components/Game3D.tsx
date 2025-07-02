@@ -47,6 +47,18 @@ const Game3D: React.FC<Game3DProps> = ({
   const [brakeEnergy, setBrakeEnergy] = useState(100);
   const [countdown, setCountdown] = useState<number | null>(null);
 
+  // Refs for mutable values accessed in animation loop
+  const gameStateRef = useRef<GameState>(gameState);
+  const isPausedRef = useRef<boolean>(isPaused);
+  const countdownRef = useRef<number | null>(countdown);
+  const onGameOverRef = useRef<typeof onGameOver>(onGameOver);
+
+  // Sync refs when corresponding state/props change
+  useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
+  useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
+  useEffect(() => { countdownRef.current = countdown; }, [countdown]);
+  useEffect(() => { onGameOverRef.current = onGameOver; }, [onGameOver]);
+
   // Only create initScene once on mount
   const initScene = useCallback(() => {
     if (!mountRef.current) return;
@@ -88,170 +100,127 @@ const Game3D: React.FC<Game3DProps> = ({
     trailRendererRef.current = new TrailRenderer(scene, DEFAULT_CONFIG);
     arenaRendererRef.current = new ArenaRenderer(scene, DEFAULT_CONFIG);
     cameraControllerRef.current = new CameraController(camera);
+
+    cameraControllerRef.current.setTurnSpeed(visualSettings.cameraTurnSpeed);
+    arenaRendererRef.current.setGridVisible(visualSettings.showGrid);
   }, []); // <-- Remove visualSettings from dependency array
 
+  // Stable animation loop
   const animate = useCallback(() => {
     if (!rendererRef.current || !sceneRef.current || !cameraRef.current) return;
-    if (!gameEngineRef.current || !bikeRendererRef.current || !trailRendererRef.current || 
+    if (!gameEngineRef.current || !bikeRendererRef.current || !trailRendererRef.current ||
         !arenaRendererRef.current || !cameraControllerRef.current) return;
 
-    // Always sync brake energy for smooth UI, regardless of pause state
-    const actualBrakeEnergy = gameEngineRef.current.getBikeState().brakeEnergy;
-    setBrakeEnergy(actualBrakeEnergy);
-
-    // Only update game logic if not paused and not in countdown
-    if (gameState === 'playing' && !isPaused && countdown === null) {
+    // Only update game when playing and not paused / counting down
+    if (gameStateRef.current === 'playing' && !isPausedRef.current && countdownRef.current === null) {
       const { newHealth } = gameEngineRef.current.update();
       if (newHealth <= 0) {
-        onGameOver?.();
+        onGameOverRef.current?.();
       }
-      
-      // Always sync health bar to actual health (fix synchronization)
+
+      // Health sync
       const actualHealth = Math.max(0, Math.min(156, newHealth));
       const healthPercentage = (actualHealth / 156) * 100;
-      if (Math.abs(bikeHealth - healthPercentage) > 0.1) {
-        setBikeHealth(healthPercentage);
-      }
+      setBikeHealth(prev => (Math.abs(prev - healthPercentage) > 0.1 ? healthPercentage : prev));
 
-      const bikeState = gameEngineRef.current.getBikeState();
-      const arena = gameEngineRef.current.getArena();
+      // Brake energy sync – always set
+      setBrakeEnergy(gameEngineRef.current.getBikeState().brakeEnergy);
 
       // Update visual components
+      const bikeState = gameEngineRef.current.getBikeState();
+      const arena = gameEngineRef.current.getArena();
       const cameraController = cameraControllerRef.current;
       cameraController.update(bikeState.position, bikeState.rotation);
-      
+
       bikeRendererRef.current.updatePosition(
         cameraController.getVisualPosition(),
         cameraController.getVisualRotation()
       );
 
-      // Trail rendering is now optimized with instanced mesh
       trailRendererRef.current.updateTrailGeometry();
 
-      // Handle new trail segments efficiently
-      const newSegments = gameEngineRef.current.getNewTrailSegments();
-      if (newSegments.length > 0) {
-        console.log(`Game3D: Adding ${newSegments.length} new trail segments`);
-      }
-      newSegments.forEach(segment => {
-        if (trailRendererRef.current) {
-          trailRendererRef.current.createTrailSegment(segment.start, segment.end);
-        }
+      // Handle new & old trail segments
+      gameEngineRef.current.getNewTrailSegments().forEach(segment => {
+        trailRendererRef.current?.createTrailSegment(segment.start, segment.end);
       });
-
-      // Remove old trail segments efficiently
-      const segmentsToRemove = gameEngineRef.current.getSegmentsToRemove();
-      if (segmentsToRemove > 0) {
-        console.log(`Game3D: Removing ${segmentsToRemove} trail segments`);
-      }
-      for (let i = 0; i < segmentsToRemove; i++) {
-        if (trailRendererRef.current) {
-          trailRendererRef.current.removeOldestTrailSegment();
-        }
+      for (let i = 0, n = gameEngineRef.current.getSegmentsToRemove(); i < n; i++) {
+        trailRendererRef.current?.removeOldestTrailSegment();
       }
 
-      // Ring updates are now optimized to run every 4 frames
       const isOutsideRing = arena.isPositionOutsideRing(bikeState.position);
       arenaRendererRef.current.updateRings(
         arena.getRingScale(),
         gameEngineRef.current.getFrameCount(),
         isOutsideRing
       );
-
-      // Check if bike died
-      if (!bikeState.alive && gameState === 'playing') {
-        setGameState('gameOver');
-        if (onGameOver) {
-          onGameOver();
-        }
-      }
     }
 
     rendererRef.current.render(sceneRef.current, cameraRef.current);
     animationIdRef.current = requestAnimationFrame(animate);
-  }, [gameState, isPaused, countdown, onGameOver]);
+  }, []); // empty deps => stable
 
   const handleKeyDown = useCallback((event: KeyboardEvent) => {
     if (!gameEngineRef.current) return;
-    
+
     const key = event.key.toLowerCase();
-    console.log('Key pressed:', key, 'code:', event.code); // Debug all key presses
-    
-    // Load keybinds from localStorage
+
+    // Dynamic read of keybinds each press (from localStorage)
     let keyBinds = {
       turnLeft: ['z', 'arrowleft'],
       turnRight: ['x', 'arrowright'],
       brake: ['space']
     };
-    
     try {
       const saved = localStorage.getItem('hypoxia-keybinds');
       if (saved) {
-        const parsedBinds = JSON.parse(saved);
-        // Ensure brake property exists (for backward compatibility)
+        const parsed = JSON.parse(saved);
         keyBinds = {
-          turnLeft: parsedBinds.turnLeft || ['z', 'arrowleft'],
-          turnRight: parsedBinds.turnRight || ['x', 'arrowright'],
-          brake: parsedBinds.brake || ['space']
+          turnLeft: parsed.turnLeft || ['z', 'arrowleft'],
+          turnRight: parsed.turnRight || ['x', 'arrowright'],
+          brake: parsed.brake || ['space']
         };
       }
-    } catch {
-      // Use defaults
-    }
-    
+    } catch {/* ignore */}
+
     if (key === 'escape' && onSettings) {
-      // Instead of setting local isPaused, just call onSettings
       onSettings();
       event.preventDefault();
-    } else if (keyBinds.turnLeft.includes(key) && !isPaused && countdown === null) {
+    } else if (keyBinds.turnLeft.includes(key) && !isPausedRef.current && countdownRef.current === null) {
       gameEngineRef.current.queueTurn('left');
       event.preventDefault();
-    } else if (keyBinds.turnRight.includes(key) && !isPaused && countdown === null) {
+    } else if (keyBinds.turnRight.includes(key) && !isPausedRef.current && countdownRef.current === null) {
       gameEngineRef.current.queueTurn('right');
       event.preventDefault();
-    } else if (keyBinds.brake.includes(key === ' ' ? 'space' : key) && !isPaused && countdown === null) {
-      console.log('Brake key pressed:', key, 'mapped to:', key === ' ' ? 'space' : key, 'Brake binds:', keyBinds.brake, 'Current brake energy:', gameEngineRef.current?.getBikeState().brakeEnergy);
+    } else if (keyBinds.brake.includes(key === ' ' ? 'space' : key) && !isPausedRef.current && countdownRef.current === null) {
       gameEngineRef.current.setBraking(true);
       event.preventDefault();
     }
-  }, [onSettings, isPaused, countdown]);
+  }, []);
 
   const handleKeyUp = useCallback((event: KeyboardEvent) => {
     if (!gameEngineRef.current) return;
-    
     const key = event.key.toLowerCase();
-    
-    // Load keybinds from localStorage
+
     let keyBinds = {
       turnLeft: ['z', 'arrowleft'],
       turnRight: ['x', 'arrowright'],
       brake: ['space']
     };
-    
     try {
       const saved = localStorage.getItem('hypoxia-keybinds');
       if (saved) {
-        const parsedBinds = JSON.parse(saved);
-        // Ensure brake property exists (for backward compatibility)
+        const parsed = JSON.parse(saved);
         keyBinds = {
-          turnLeft: parsedBinds.turnLeft || ['z', 'arrowleft'],
-          turnRight: parsedBinds.turnRight || ['x', 'arrowright'],
-          brake: parsedBinds.brake || ['space']
+          turnLeft: parsed.turnLeft || ['z', 'arrowleft'],
+          turnRight: parsed.turnRight || ['x', 'arrowright'],
+          brake: parsed.brake || ['space']
         };
       }
-    } catch {
-      // Use defaults
-    }
-    
-    if (keyBinds.turnLeft.includes(key) || keyBinds.turnRight.includes(key) || 
-        keyBinds.brake.includes(key === ' ' ? 'space' : key)) {
+    } catch {/* ignore */}
+
+    if (keyBinds.brake.includes(key === ' ' ? 'space' : key)) {
+      gameEngineRef.current.setBraking(false);
       event.preventDefault();
-      
-      // Stop braking on key release
-      if (keyBinds.brake.includes(key === ' ' ? 'space' : key)) {
-        console.log('Brake key released:', key, 'mapped to:', key === ' ' ? 'space' : key, 'Current brake energy:', gameEngineRef.current?.getBikeState().brakeEnergy);
-        gameEngineRef.current.setBraking(false);
-      }
     }
   }, []);
 
@@ -269,6 +238,7 @@ const Game3D: React.FC<Game3DProps> = ({
     rendererRef.current.setSize(window.innerWidth, window.innerHeight);
   }, []);
 
+  // Init + listeners effect (runs once)
   useEffect(() => {
     initScene();
 
@@ -276,45 +246,28 @@ const Game3D: React.FC<Game3DProps> = ({
     window.addEventListener('keyup', handleKeyUp);
     window.addEventListener('resize', handleResize);
 
-    // Capture the current mount ref value for cleanup
     const currentMount = mountRef.current;
 
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('resize', handleResize);
-      
-      if (animationIdRef.current) {
-        cancelAnimationFrame(animationIdRef.current);
-      }
-      
+      if (animationIdRef.current) cancelAnimationFrame(animationIdRef.current);
       if (rendererRef.current && currentMount && currentMount.contains(rendererRef.current.domElement)) {
         currentMount.removeChild(rendererRef.current.domElement);
       }
-
-      // Dispose of renderer resources
-      if (trailRendererRef.current) {
-        trailRendererRef.current.dispose();
-      }
-      if (rendererRef.current) {
-        rendererRef.current.dispose();
-      }
+      trailRendererRef.current?.dispose();
+      rendererRef.current?.dispose();
     };
-  }, [initScene, handleKeyDown, handleKeyUp, handleResize]); // initScene no longer depends on visualSettings
+  }, []); // <-- empty dependencies so initScene runs ONCE
 
+  // Kick off animation loop once on mount
   useEffect(() => {
-    if (gameState === 'playing') {
-      animationIdRef.current = requestAnimationFrame(animate);
-    } else if (animationIdRef.current) {
-      cancelAnimationFrame(animationIdRef.current);
-    }
-
+    animationIdRef.current = requestAnimationFrame(animate);
     return () => {
-      if (animationIdRef.current) {
-        cancelAnimationFrame(animationIdRef.current);
-      }
+      if (animationIdRef.current) cancelAnimationFrame(animationIdRef.current);
     };
-  }, [gameState, animate]);
+  }, [animate]);
 
   // Handle resume from parent
   useEffect(() => {

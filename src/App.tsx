@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import MainMenu from './components/MainMenu';
 import Tutorial from './components/Tutorial';
 import Settings from './components/Settings';
@@ -19,6 +19,22 @@ function App() {
     showGrid: true,
     cameraTurnSpeed: 0.5
   });
+
+  useEffect(() => {
+    try {
+      const savedVisuals = localStorage.getItem('hypoxia-visual-settings');
+      if (savedVisuals) {
+        const parsed = JSON.parse(savedVisuals);
+        setVisualSettings({
+          fov: parsed.fov ?? 75,
+          showGrid: parsed.showGrid ?? true,
+          cameraTurnSpeed: parsed.cameraTurnSpeed ?? 0.5,
+        });
+      }
+    } catch {
+      // ignore corrupted storage
+    }
+  }, []);
 
   const handleStartPractice = () => {
     setCurrentState('practice');
