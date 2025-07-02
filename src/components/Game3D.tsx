@@ -47,6 +47,7 @@ const Game3D: React.FC<Game3DProps> = ({
   const [brakeEnergy, setBrakeEnergy] = useState(100);
   const [countdown, setCountdown] = useState<number | null>(null);
 
+  // Only create initScene once on mount
   const initScene = useCallback(() => {
     if (!mountRef.current) return;
 
@@ -87,18 +88,18 @@ const Game3D: React.FC<Game3DProps> = ({
     trailRendererRef.current = new TrailRenderer(scene, DEFAULT_CONFIG);
     arenaRendererRef.current = new ArenaRenderer(scene, DEFAULT_CONFIG);
     cameraControllerRef.current = new CameraController(camera);
-    
-    // Set initial visual settings
-    arenaRendererRef.current.setGridVisible(visualSettings.showGrid);
-    cameraControllerRef.current.setTurnSpeed(visualSettings.cameraTurnSpeed);
-  }, [visualSettings]);
+  }, []); // <-- Remove visualSettings from dependency array
 
   const animate = useCallback(() => {
     if (!rendererRef.current || !sceneRef.current || !cameraRef.current) return;
     if (!gameEngineRef.current || !bikeRendererRef.current || !trailRendererRef.current || 
         !arenaRendererRef.current || !cameraControllerRef.current) return;
 
-    // Use prop isPaused instead of local state
+    // Always sync brake energy for smooth UI, regardless of pause state
+    const actualBrakeEnergy = gameEngineRef.current.getBikeState().brakeEnergy;
+    setBrakeEnergy(actualBrakeEnergy);
+
+    // Only update game logic if not paused and not in countdown
     if (gameState === 'playing' && !isPaused && countdown === null) {
       const { newHealth } = gameEngineRef.current.update();
       if (newHealth <= 0) {
@@ -110,12 +111,6 @@ const Game3D: React.FC<Game3DProps> = ({
       const healthPercentage = (actualHealth / 156) * 100;
       if (Math.abs(bikeHealth - healthPercentage) > 0.1) {
         setBikeHealth(healthPercentage);
-      }
-      
-      // Also sync brake energy - update more frequently for smooth UI
-      const actualBrakeEnergy = gameEngineRef.current.getBikeState().brakeEnergy;
-      if (Math.abs(brakeEnergy - actualBrakeEnergy) > 0.05) {
-        setBrakeEnergy(actualBrakeEnergy);
       }
 
       const bikeState = gameEngineRef.current.getBikeState();
@@ -174,7 +169,7 @@ const Game3D: React.FC<Game3DProps> = ({
 
     rendererRef.current.render(sceneRef.current, cameraRef.current);
     animationIdRef.current = requestAnimationFrame(animate);
-  }, [gameState, bikeHealth, brakeEnergy, isPaused, countdown, onGameOver]);
+  }, [gameState, isPaused, countdown, onGameOver]);
 
   const handleKeyDown = useCallback((event: KeyboardEvent) => {
     if (!gameEngineRef.current) return;
@@ -305,7 +300,7 @@ const Game3D: React.FC<Game3DProps> = ({
         rendererRef.current.dispose();
       }
     };
-  }, [initScene, handleKeyDown, handleKeyUp, handleResize]);
+  }, [initScene, handleKeyDown, handleKeyUp, handleResize]); // initScene no longer depends on visualSettings
 
   useEffect(() => {
     if (gameState === 'playing') {

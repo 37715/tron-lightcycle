@@ -741,20 +741,22 @@
 /* Base keybind box styling - wacky animated style */
 .keybind-box {
   position: relative;
-  background: rgba(200, 200, 200, 0.7);
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  color: #333;
-  padding: 2rem;
+  background: linear-gradient(135deg, rgba(220, 230, 255, 0.85) 0%, rgba(180, 200, 255, 0.7) 100%);
+  border: 2.5px solid rgba(80, 120, 255, 0.18);
+  color: #222;
+  padding: 2.2rem;
   min-height: 180px;
   cursor: pointer;
   overflow: hidden;
-  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  border-radius: 22px;
+  box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.18);
+  transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
   transform-origin: center;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 1rem;
+  gap: 1.2rem;
 }
 
 /* Unique wacky shapes and rotations for each keybind box */
@@ -781,30 +783,18 @@
 }
 
 /* Enhanced wacky hover effects for each box */
-.keybind-box:nth-child(1):hover {
-  transform: rotate(-3deg) translateX(-18px) scale(1.08);
-  border-color: rgba(58, 123, 213, 0.5);
-  box-shadow: 0 15px 35px rgba(58, 123, 213, 0.3);
-}
-
-.keybind-box:nth-child(2):hover {
-  transform: rotate(2.8deg) translateX(15px) scale(1.08);
-  border-color: rgba(58, 123, 213, 0.5);
-  box-shadow: 0 15px 35px rgba(58, 123, 213, 0.3);
-}
-
-.keybind-box:nth-child(3):hover {
-  transform: scale(1.08) rotate(-1deg) translateY(-10px);
-  border-color: rgba(58, 123, 213, 0.5);
-  box-shadow: 0 15px 35px rgba(58, 123, 213, 0.3);
+.keybind-box:hover {
+  box-shadow: 0 12px 40px 0 rgba(80, 120, 255, 0.22), 0 0 0 4px rgba(80, 120, 255, 0.10);
+  border-color: #3a7bd5;
+  background: linear-gradient(135deg, rgba(230, 240, 255, 0.95) 0%, rgba(180, 200, 255, 0.8) 100%);
+  transform: scale(1.04) rotate(-0.5deg);
 }
 
 /* Selected state styling - overrides hover */
 .keybind-selected {
-  border-color: rgba(255, 255, 0, 1) !important;
-  box-shadow: 0 0 30px rgba(255, 255, 0, 0.8), 
-              0 0 15px rgba(255, 255, 0, 0.6),
-              inset 0 0 20px rgba(255, 255, 0, 0.15) !important;
+  border-color: #ffe066 !important;
+  box-shadow: 0 0 40px 0 #ffe06699, 0 0 0 6px #ffe06633 !important;
+  background: linear-gradient(135deg, #fffbe6 0%, #ffe066 100%);
 }
 
 /* Selected state hover effects - maintain yellow glow but with transforms */
@@ -905,29 +895,49 @@
 }
 
 .keybind-key {
-  background: linear-gradient(135deg, #2a2a2a 0%, #1a1a1a 100%);
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-radius: 8px;
-  padding: 0.8rem 1.2rem;
-  color: white;
-  font-weight: bold;
-  font-size: 1rem;
-  min-width: 50px;
+  background: linear-gradient(135deg, #3a7bd5 0%, #2563eb 100%);
+  border: 2.5px solid rgba(255, 255, 255, 0.45);
+  border-radius: 12px;
+  padding: 1rem 1.5rem;
+  color: #fff;
+  font-weight: 700;
+  font-size: 1.1rem;
+  min-width: 60px;
   text-align: center;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 4px 16px rgba(58, 123, 213, 0.18);
+  transition: all 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
+  outline: none;
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+}
+
+.keybind-key:hover, .keybind-key:focus {
+  background: linear-gradient(135deg, #2563eb 0%, #3a7bd5 100%);
+  box-shadow: 0 0 0 4px #3a7bd555, 0 6px 24px rgba(58, 123, 213, 0.22);
+  border-color: #fffbe6;
+  color: #ffe066;
+  z-index: 1;
+}
+
+.keybind-key:active {
+  background: linear-gradient(135deg, #1a237e 0%, #3a7bd5 100%);
+  color: #fffbe6;
+  transform: scale(0.97);
 }
 
 .keybind-prompt {
   position: absolute;
-  bottom: 1rem;
+  bottom: 1.2rem;
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(255, 255, 0, 0.9);
-  color: #333;
-  padding: 0.5rem 1rem;
-  border-radius: 20px;
-  font-size: 0.9rem;
+  background: linear-gradient(90deg, #ffe066 0%, #fffbe6 100%);
+  color: #222;
+  padding: 0.6rem 1.2rem;
+  border-radius: 22px;
+  font-size: 1rem;
   font-weight: bold;
+  box-shadow: 0 2px 12px #ffe06655;
   animation: prompt-flash 0.5s ease-in-out infinite alternate;
 }
 
