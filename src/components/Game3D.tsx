@@ -143,8 +143,13 @@ const Game3D: React.FC<Game3DProps> = ({
       gameEngineRef.current.getNewTrailSegments().forEach(segment => {
         trailRendererRef.current?.createTrailSegment(segment.start, segment.end);
       });
-      for (let i = 0, n = gameEngineRef.current.getSegmentsToRemove(); i < n; i++) {
-        trailRendererRef.current?.removeOldestTrailSegment();
+
+      // Remove only as many segments as currently exist to keep visual and collision data in sync
+      const pendingRemovals = gameEngineRef.current.getSegmentsToRemove();
+      const availableSegments = trailRendererRef.current.getTrailMeshCount();
+      const removals = Math.min(pendingRemovals, availableSegments);
+      for (let i = 0; i < removals; i++) {
+        trailRendererRef.current.removeOldestTrailSegment();
       }
 
       const isOutsideRing = arena.isPositionOutsideRing(bikeState.position);

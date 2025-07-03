@@ -14,14 +14,13 @@ export class TrailRenderer {
   private tempScale = new THREE.Vector3();
 
   constructor(private scene: THREE.Scene, private config: GameConfig) {
-    // Calculate max segments for shorter, more precise trail  
-    // At 0.065 speed with segments every 0.3 units: 0.065 * 7200 / 0.3 = ~1560 segments needed
-    const bikeSpeed = 0.065;
-    const segmentDistance = 0.3; // Dense segments for smooth trail
-    const maxDistance = bikeSpeed * this.config.trailMaxFrames;
-    this.maxSegments = Math.ceil(maxDistance / segmentDistance) + 50; // Smaller buffer for shorter trail
+    // Set a very generous maximum number of segments that can never be reached
+    // under normal gameplay. We simply double the maximum number of frames the
+    // trail is allowed to live. Even if a new segment were created EVERY frame,
+    // this capacity would still not be exceeded.
+    this.maxSegments = this.config.trailMaxFrames * 2; // e.g. 7200 * 2 = 14 400
     
-    console.log(`TrailRenderer initialized: maxSegments=${this.maxSegments}, trailMaxFrames=${this.config.trailMaxFrames}, expectedDistance=${maxDistance}`);
+    console.log(`TrailRenderer initialized: maxSegments=${this.maxSegments}, trailMaxFrames=${this.config.trailMaxFrames}, expectedDistance=${this.maxSegments}`);
     
     // Create shared geometry for all trail segments
     this.segmentGeometry = new THREE.BoxGeometry(
@@ -58,16 +57,26 @@ export class TrailRenderer {
   }
 
   public createTrailSegment(start: THREE.Vector3, end: THREE.Vector3): void {
+    // Prevent exceeding the maximum; rely on GameEngine to signal when a segment should be
+    // removed so that the visual trail always stays in sync with collision data.
+    // If we reach the capacity, simply skip adding new segments until GameEngine trims old ones.
     if (this.segmentCount >= this.maxSegments) {
-      // Remove oldest segment first
-      console.warn(`TrailRenderer: Max segments (${this.maxSegments}) reached! Force removing oldest.`);
-      this.removeOldestTrailSegment();
+      // This should be extremely rare because maxSegments is calculated to comfortably
+      // exceed the number of segments that can exist given trailMaxFrames.
+      // Log once per overflow attempt for debugging but do NOT remove any segment here.
+      console.warn(`TrailRenderer: Max segments (${this.maxSegments}) reached! Segment creation skipped to maintain sync with GameEngine.`);
+      return;
     }
 
     const direction = new THREE.Vector3().subVectors(end, start);
-    const length = direction.length();
+    let length = direction.length();
 
-    if (length < 0.1) return;
+    // Ensure we still render very short segments so that any collidable trail
+    // is always visible to the player. Clamp to a small minimum length.
+    const MIN_RENDER_LENGTH = 0.05; // 5 cm visual stub
+    if (length < MIN_RENDER_LENGTH) {
+      length = MIN_RENDER_LENGTH;
+    }
 
     // Calculate segment position and orientation
     const midpoint = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
