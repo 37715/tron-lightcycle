@@ -49,6 +49,9 @@ export interface GameConfig {
   brakeRechargeRate: number;
   brakeRechargeDelayFrames: number;
   brakeSpeedReduction: number;
+
+  // Respawn system
+  respawnDelayFrames: number; // Frames to wait before a dead bike respawns
 }
 
 export interface CollisionResult {

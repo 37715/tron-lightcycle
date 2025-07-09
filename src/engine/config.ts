@@ -32,4 +32,7 @@ export const DEFAULT_CONFIG: GameConfig = {
   brakeRechargeRate: 0.14, // Energy gained per frame while recharging (about 12 seconds to fully recharge)
   brakeRechargeDelayFrames: 60, // 1 second delay before recharge starts
   brakeSpeedReduction: 0.5, // Maximum speed multiplier when braking (50% of normal speed when fully depleted)
+
+  // Respawn system
+  respawnDelayFrames: 0 // Instant respawn
 };

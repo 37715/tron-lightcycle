@@ -16,6 +16,10 @@ export interface BikeData {
   segmentsToRemove: number;
   isAI: boolean;
   color: string;
+
+  // Respawn system
+  spawnPosition: THREE.Vector3;
+  initialRotation: number;
 }
 
 export class MultiplayerGameEngine {
@@ -41,14 +45,16 @@ export class MultiplayerGameEngine {
       newTrailSegments: [],
       segmentsToRemove: 0,
       isAI: false,
-      color: '#00ffff' // Cyan for player
+      color: '#00ffff', // Cyan for player
+      spawnPosition: new THREE.Vector3(0, 0, 10),
+      initialRotation: 0
     };
     this.bikes.set(id, bikeData);
   }
 
   public addAIBike(id: string = 'ai'): void {
     const bikeData: BikeData = {
-      state: this.createInitialBikeState(new THREE.Vector3(0, 0, -10)),
+      state: this.createInitialBikeState(new THREE.Vector3(0, 0, -10), Math.PI),
       physics: new BikePhysics(this.config),
       turnQueue: [],
       lastHitFrame: 0,
@@ -58,16 +64,18 @@ export class MultiplayerGameEngine {
       newTrailSegments: [],
       segmentsToRemove: 0,
       isAI: true,
-      color: '#ff0000' // Red for AI
+      color: '#ff0000', // Red for AI
+      spawnPosition: new THREE.Vector3(0, 0, -10),
+      initialRotation: Math.PI
     };
     bikeData.state.rotation = Math.PI; // Face opposite direction
     this.bikes.set(id, bikeData);
   }
 
-  private createInitialBikeState(position: THREE.Vector3): BikeState {
+  private createInitialBikeState(position: THREE.Vector3, rotation: number = 0): BikeState {
     return {
       position: position.clone(),
-      rotation: 0,
+      rotation,
       trail: [position.clone()],
       alive: true,
       speed: this.config.bikeSpeed,
@@ -169,7 +177,7 @@ export class MultiplayerGameEngine {
     // Update each bike
     this.bikes.forEach((bike, bikeId) => {
       if (!bike.state.alive) {
-        healthUpdates.set(bikeId, { healthChanged: false, newHealth: bike.state.health });
+        // Should not happen because we instantly respawn, but guard anyway
         return;
       }
 
@@ -330,7 +338,7 @@ export class MultiplayerGameEngine {
         }
         
         if (bike.state.graceFramesRemaining <= 0) {
-          bike.state.alive = false;
+          this.respawnBike(bike);
         }
       } else {
         bike.state.graceFramesRemaining = 0;
@@ -369,5 +377,20 @@ export class MultiplayerGameEngine {
     const count = bike.segmentsToRemove;
     bike.segmentsToRemove = 0;
     return count;
+  }
+
+  private respawnBike(bike: BikeData): void {
+    // Schedule removal of ALL existing trail segments
+    bike.segmentsToRemove = 10000; // Large number to clear everything
+
+    // Reset physics map
+    bike.physics.resetGrindDepthMap();
+
+    // Clear trail tracking arrays
+    bike.trailFrames = [];
+    bike.newTrailSegments = [];
+
+    // Recreate bike state
+    bike.state = this.createInitialBikeState(bike.spawnPosition.clone(), bike.initialRotation);
   }
 } 

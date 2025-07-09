@@ -93,64 +93,65 @@ const PracticeGame3D: React.FC<PracticeGame3DProps> = ({
   useEffect(() => { countdownRef.current = countdown; }, [countdown]);
   useEffect(() => { onGameOverRef.current = onGameOver; }, [onGameOver]);
 
+  // Only create initScene once on mount
   const initScene = useCallback(() => {
-    if (!mountRef.current) return;
+     if (!mountRef.current) return;
 
-    // Scene setup
-    const scene = new THREE.Scene();
-    scene.fog = new THREE.Fog(0x0a0a0a, 40, 180);
-    sceneRef.current = scene;
+     // Scene setup
+     const scene = new THREE.Scene();
+     scene.fog = new THREE.Fog(0x0a0a0a, 40, 180);
+     sceneRef.current = scene;
 
-    // Camera setup
-    const camera = new THREE.PerspectiveCamera(
-      visualSettings.fov,
-      window.innerWidth / window.innerHeight,
-      0.1,
-      1000
-    );
-    camera.position.set(0, 8, 10);
-    cameraRef.current = camera;
+     // Camera setup
+     const camera = new THREE.PerspectiveCamera(
+       visualSettings.fov,
+       window.innerWidth / window.innerHeight,
+       0.1,
+       1000
+     );
+     camera.position.set(0, 8, 10);
+     cameraRef.current = camera;
 
-    // Renderer setup
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setClearColor(0xf0f0f0);
-    renderer.shadowMap.enabled = false;
-    mountRef.current.appendChild(renderer.domElement);
-    rendererRef.current = renderer;
+     // Renderer setup
+     const renderer = new THREE.WebGLRenderer({ antialias: true });
+     renderer.setSize(window.innerWidth, window.innerHeight);
+     renderer.setClearColor(0xf0f0f0);
+     renderer.shadowMap.enabled = false;
+     mountRef.current.appendChild(renderer.domElement);
+     rendererRef.current = renderer;
 
-    // Lighting
-    const ambientLight = new THREE.HemisphereLight(0xffffff, 0x444444, 1.0);
-    scene.add(ambientLight);
+     // Lighting
+     const ambientLight = new THREE.HemisphereLight(0xffffff, 0x444444, 1.0);
+     scene.add(ambientLight);
 
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.6);
-    directionalLight.position.set(5, 10, 7);
-    scene.add(directionalLight);
+     const directionalLight = new THREE.DirectionalLight(0xffffff, 0.6);
+     directionalLight.position.set(5, 10, 7);
+     scene.add(directionalLight);
 
-    // Initialize multiplayer game engine
-    gameEngineRef.current = new MultiplayerGameEngine(DEFAULT_CONFIG);
-    
-    // Add player and AI bikes
-    gameEngineRef.current.addPlayerBike('player');
-    gameEngineRef.current.addAIBike('ai');
+     // Initialize multiplayer game engine
+     gameEngineRef.current = new MultiplayerGameEngine(DEFAULT_CONFIG);
+     
+     // Add player and AI bikes
+     gameEngineRef.current.addPlayerBike('player');
+     gameEngineRef.current.addAIBike('ai');
 
-    // Create renderers for each bike
-    const playerBikeRenderer = new BikeRenderer(scene); // Default player bike (no color change)
-    const aiBikeRenderer = new ColoredBikeRenderer(scene, 0xff0000); // Red for AI
-    bikeRenderersRef.current.set('player', playerBikeRenderer);
-    bikeRenderersRef.current.set('ai', aiBikeRenderer);
+     // Create renderers for each bike
+     const playerBikeRenderer = new BikeRenderer(scene); // Default player bike (no color change)
+     const aiBikeRenderer = new ColoredBikeRenderer(scene, 0xff0000); // Red for AI
+     bikeRenderersRef.current.set('player', playerBikeRenderer);
+     bikeRenderersRef.current.set('ai', aiBikeRenderer);
 
-    const playerTrailRenderer = new TrailRenderer(scene, DEFAULT_CONFIG); // Default trail color
-    const aiTrailRenderer = new ColoredTrailRenderer(scene, DEFAULT_CONFIG, 0xff0000); // Red trails
-    trailRenderersRef.current.set('player', playerTrailRenderer);
-    trailRenderersRef.current.set('ai', aiTrailRenderer);
+     const playerTrailRenderer = new TrailRenderer(scene, DEFAULT_CONFIG); // Default trail color
+     const aiTrailRenderer = new ColoredTrailRenderer(scene, DEFAULT_CONFIG, 0xff0000); // Red trails
+     trailRenderersRef.current.set('player', playerTrailRenderer);
+     trailRenderersRef.current.set('ai', aiTrailRenderer);
 
-    arenaRendererRef.current = new ArenaRenderer(scene, DEFAULT_CONFIG);
-    cameraControllerRef.current = new CameraController(camera);
+     arenaRendererRef.current = new ArenaRenderer(scene, DEFAULT_CONFIG);
+     cameraControllerRef.current = new CameraController(camera);
 
-    cameraControllerRef.current.setTurnSpeed(visualSettings.cameraTurnSpeed);
-    arenaRendererRef.current.setGridVisible(visualSettings.showGrid);
-  }, []);
+     cameraControllerRef.current.setTurnSpeed(visualSettings.cameraTurnSpeed);
+     arenaRendererRef.current.setGridVisible(visualSettings.showGrid);
+  }, []); // <-- Remove visualSettings from dependency array
 
   const animate = useCallback(() => {
     if (!rendererRef.current || !sceneRef.current || !cameraRef.current) return;
@@ -160,19 +161,9 @@ const PracticeGame3D: React.FC<PracticeGame3DProps> = ({
     if (gameStateRef.current === 'playing' && !isPausedRef.current && countdownRef.current === null) {
       const healthUpdates = gameEngineRef.current.update();
       
-      // Check for game over
       const playerBike = gameEngineRef.current.getBikeState('player');
       const aiBike = gameEngineRef.current.getBikeState('ai');
       
-      if (playerBike && !playerBike.alive && aiBike && !aiBike.alive) {
-        // Both died - tie, but AI wins
-        onGameOverRef.current?.('ai');
-      } else if (playerBike && !playerBike.alive) {
-        onGameOverRef.current?.('ai');
-      } else if (aiBike && !aiBike.alive) {
-        onGameOverRef.current?.('player');
-      }
-
       // Update health displays
       healthUpdates.forEach((update, bikeId) => {
         const actualHealth = Math.max(0, Math.min(156, update.newHealth));
@@ -217,7 +208,9 @@ const PracticeGame3D: React.FC<PracticeGame3DProps> = ({
 
           // Remove old segments
           const removals = gameEngineRef.current!.getSegmentsToRemove(bikeId);
-          for (let i = 0; i < removals; i++) {
+          const available = trailRenderer.getTrailMeshCount();
+          const toRemove = Math.min(removals, available);
+          for (let i = 0; i < toRemove; i++) {
             trailRenderer.removeOldestTrailSegment();
           }
         }
@@ -304,6 +297,12 @@ const PracticeGame3D: React.FC<PracticeGame3DProps> = ({
     }
   }, []);
 
+  const resumeGame = useCallback(() => {
+    if (onResume) {
+      onResume();
+    }
+  }, [onResume]);
+
   const handleResize = useCallback(() => {
     if (!cameraRef.current || !rendererRef.current) return;
 
@@ -312,7 +311,7 @@ const PracticeGame3D: React.FC<PracticeGame3DProps> = ({
     rendererRef.current.setSize(window.innerWidth, window.innerHeight);
   }, []);
 
-  // Init + listeners
+  // Init + listeners effect (runs once)
   useEffect(() => {
     initScene();
 
@@ -333,9 +332,9 @@ const PracticeGame3D: React.FC<PracticeGame3DProps> = ({
       trailRenderersRef.current.forEach(renderer => renderer.dispose());
       rendererRef.current?.dispose();
     };
-  }, [handleKeyDown, handleKeyUp, handleResize, initScene]);
+  }, []); // <-- empty dependencies so initScene runs ONCE
 
-  // Start animation loop
+  // Kick off animation loop once on mount
   useEffect(() => {
     animationIdRef.current = requestAnimationFrame(animate);
     return () => {
@@ -343,7 +342,14 @@ const PracticeGame3D: React.FC<PracticeGame3DProps> = ({
     };
   }, [animate]);
 
-  // Update visual settings
+  // Handle resume from parent
+  useEffect(() => {
+    if (shouldResume) {
+      resumeGame();
+    }
+  }, [shouldResume, resumeGame]);
+
+  // Update visual settings - only update properties, don't reinitialize
   useEffect(() => {
     if (cameraRef.current && visualSettings) {
       cameraRef.current.fov = visualSettings.fov;
