@@ -3,8 +3,9 @@ import MainMenu from './components/MainMenu';
 import Tutorial from './components/Tutorial';
 import Settings from './components/Settings';
 import Game3D from './components/Game3D';
+import PracticeGame3D from './components/PracticeGame3D';
 
-type AppState = 'menu' | 'tutorial' | 'settings' | 'practice' | 'paused' | 'gameOverSettings';
+type AppState = 'menu' | 'tutorial' | 'settings' | 'practice' | 'practiceAI' | 'paused' | 'pausedAI' | 'gameOverSettings' | 'gameOverSettingsAI';
 
 interface VisualSettings {
   fov: number;
@@ -37,7 +38,8 @@ function App() {
   }, []);
 
   const handleStartPractice = () => {
-    setCurrentState('practice');
+    // For now, go directly to AI practice mode
+    setCurrentState('practiceAI');
   };
 
   const handleShowTutorial = () => {
@@ -53,13 +55,18 @@ function App() {
   };
 
   const handleBackToPractice = () => {
-    setCurrentState('practice');
+    if (currentState === 'pausedAI' || currentState === 'gameOverSettingsAI') {
+      setCurrentState('practiceAI');
+    } else {
+      setCurrentState('practice');
+    }
   };
 
   const handleRestartGame = () => {
     // Force a complete restart by cycling through menu briefly
+    const targetState = (currentState === 'pausedAI' || currentState === 'gameOverSettingsAI') ? 'practiceAI' : 'practice';
     setCurrentState('menu');
-    setTimeout(() => setCurrentState('practice'), 50);
+    setTimeout(() => setCurrentState(targetState), 50);
   };
 
   const handleBackToMenu = () => {
@@ -67,7 +74,19 @@ function App() {
   };
 
   const handlePauseOverlay = () => {
-    setCurrentState('paused');
+    if (currentState === 'practiceAI') {
+      setCurrentState('pausedAI');
+    } else {
+      setCurrentState('paused');
+    }
+  };
+
+  const handleGameOver = (winner?: 'player' | 'ai') => {
+    if (currentState === 'practiceAI') {
+      setCurrentState('gameOverSettingsAI');
+    } else {
+      setCurrentState('gameOverSettings');
+    }
   };
 
   return (
@@ -94,20 +113,17 @@ function App() {
         />
       )}
 
-      {/* Game Practice + Pause Overlay (no separate 'inGameSettings' state) */}
+      {/* Solo Practice + Pause Overlay */}
       {(currentState === 'practice' || currentState === 'paused' || currentState === 'gameOverSettings') && (
         <div className="relative w-full h-screen">
-          {/* Game3D is always mounted, we just pass isPaused if we're showing an overlay */}
           <Game3D
-            onSettings={handlePauseOverlay} // ESC just toggles local pause now
-            onGameOver={handleShowGameOverSettings}
+            onSettings={handlePauseOverlay}
+            onGameOver={() => handleGameOver()}
             onResume={handleBackToPractice}
-            // Pause the game only when we're in "paused" or "gameOverSettings"
             isPaused={currentState === 'paused' || currentState === 'gameOverSettings'}
             visualSettings={visualSettings}
           />
 
-          {/* If we're in paused, show the overlay */}
           {currentState === 'paused' && (
             <div className="absolute inset-0 bg-black bg-opacity-60 z-30">
               <Settings
@@ -121,8 +137,46 @@ function App() {
             </div>
           )}
 
-          {/* If we're in gameOverSettings, show the overlay */}
           {currentState === 'gameOverSettings' && (
+            <div className="absolute inset-0 bg-black bg-opacity-60 z-30">
+              <Settings
+                onBack={handleBackToPractice}
+                onLeaveGame={handleBackToMenu}
+                onRestartGame={handleRestartGame}
+                isInGame={true}
+                isGameOver={true}
+                onVisualSettingsChange={setVisualSettings}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* AI Practice + Pause Overlay */}
+      {(currentState === 'practiceAI' || currentState === 'pausedAI' || currentState === 'gameOverSettingsAI') && (
+        <div className="relative w-full h-screen">
+          <PracticeGame3D
+            onSettings={handlePauseOverlay}
+            onGameOver={handleGameOver}
+            onResume={handleBackToPractice}
+            isPaused={currentState === 'pausedAI' || currentState === 'gameOverSettingsAI'}
+            visualSettings={visualSettings}
+          />
+
+          {currentState === 'pausedAI' && (
+            <div className="absolute inset-0 bg-black bg-opacity-60 z-30">
+              <Settings
+                onBack={handleBackToPractice}
+                onLeaveGame={handleBackToMenu}
+                onRestartGame={handleRestartGame}
+                isInGame={true}
+                isGameOver={false}
+                onVisualSettingsChange={setVisualSettings}
+              />
+            </div>
+          )}
+
+          {currentState === 'gameOverSettingsAI' && (
             <div className="absolute inset-0 bg-black bg-opacity-60 z-30">
               <Settings
                 onBack={handleBackToPractice}
