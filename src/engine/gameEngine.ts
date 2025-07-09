@@ -176,17 +176,40 @@ export class GameEngine {
     
     if (collision.hit && collision.normal) {
       const push = direction.dot(collision.normal);
-      if (push < 0) {
-        // Head-on collision
+      
+      // Simplified and correct head-on collision detection:
+      // For head-on collision: bike moving directly into wall (push should be strongly negative)
+      // For grinding: bike moving parallel to wall (push should be close to 0)
+      // The dot product tells us how directly we're hitting the wall
+      
+             // Normalize the collision normal to ensure consistent dot product calculations
+       const normalizedNormal = collision.normal.clone().normalize();
+       const normalizedDirection = direction.clone().normalize();
+       const normalizedPush = normalizedDirection.dot(normalizedNormal);
+       
+       // Debug logging to understand collision values
+       if (this.frameCount % 30 === 0) {
+         console.log(`Collision Debug: normalizedPush=${normalizedPush.toFixed(3)}, rawPush=${push.toFixed(3)}, direction=(${direction.x.toFixed(2)}, ${direction.z.toFixed(2)}), normal=(${collision.normal.x.toFixed(2)}, ${collision.normal.z.toFixed(2)})`);
+       }
+      
+             // Head-on collision: using normalized vectors for consistent detection
+       // For head-on collision, normalized push should be significantly negative (moving into wall)
+       // For grinding, normalized push should be close to 0 (moving parallel to wall)
+       if (normalizedPush < -0.6) {
+        // True head-on collision - moving directly into the wall
         headOn = true;
         this.bikeState.grindOffset = Math.min(this.bikeState.grindOffset + 0.02, 0.3);
         this.bikeState.health = Math.max(0, this.bikeState.health - 1.2);
         this.lastHitFrame = this.frameCount;
         this.lastDamageType = 'collision';
         healthChanged = true;
-      } else {
-        // Grinding parallel to wall, no damage
-        this.bikeState.grindOffset = Math.min(this.bikeState.grindOffset + 0.01, 0.3);
+                 console.log(`HEAD-ON COLLISION: normalizedPush=${normalizedPush.toFixed(3)}, health=${this.bikeState.health.toFixed(1)}`);
+       } else {
+         // Grinding parallel to wall or glancing collision, no damage
+         this.bikeState.grindOffset = Math.min(this.bikeState.grindOffset + 0.01, 0.3);
+         if (this.frameCount % 60 === 0) {
+           console.log(`GRINDING: normalizedPush=${normalizedPush.toFixed(3)}, no damage`);
+         }
       }
       newPosition.add(collision.normal.clone().multiplyScalar(-this.bikeState.grindOffset));
     } else {

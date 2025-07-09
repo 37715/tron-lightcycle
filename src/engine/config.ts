@@ -2,7 +2,7 @@ import { GameConfig } from './types';
 
 export const DEFAULT_CONFIG: GameConfig = {
   // Bike constants
-  bikeSpeed: 0.065,
+  bikeSpeed: 0.061,
   turnDelayFrames: 20,
   boundaryLimit: 44.975,
   regenDelayFrames: 60,
@@ -16,7 +16,7 @@ export const DEFAULT_CONFIG: GameConfig = {
   ringInitialRadius: 25,
   ringMinRadius: 3,
   ringShrinkTime: 270 * 60, // 4.5 minutes at 60fps
-  ringDepletionFrames: 30 * 60, // 30 seconds at 60fps
+  ringDepletionFrames: 25 * 60, // 25 seconds at 60fps (faster depletion)
   ringSpinSpeed: 0.0005,
   
   // Health regeneration
@@ -29,7 +29,7 @@ export const DEFAULT_CONFIG: GameConfig = {
   // Brake system
   brakeMaxEnergy: 100,
   brakeDepletionRate: 0.33, // Energy lost per frame while braking (about 5 seconds of use at 60fps)
-  brakeRechargeRate: 0.165, // Energy gained per frame while recharging (about 10 seconds to fully recharge)
+  brakeRechargeRate: 0.14, // Energy gained per frame while recharging (about 12 seconds to fully recharge)
   brakeRechargeDelayFrames: 60, // 1 second delay before recharge starts
   brakeSpeedReduction: 0.5, // Maximum speed multiplier when braking (50% of normal speed when fully depleted)
 };

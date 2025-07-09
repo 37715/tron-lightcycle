@@ -18,6 +18,15 @@ const MainMenu: React.FC<MainMenuProps> = ({ onStartPractice, onTutorial, onSett
         <div className="grid-glow"></div>
       </div>
       
+      {/* Leaderboard Button - Positioned in top right corner */}
+      <div className="leaderboard-corner-button">
+        <button className="leaderboard-button ui-text" disabled title="Competitive Leaderboard - Coming Soon">
+          <span className="leaderboard-icon">📊</span>
+          <span className="leaderboard-text">LEADERBOARD</span>
+          <span className="leaderboard-coming-soon">COMING SOON</span>
+        </button>
+      </div>
+
       {/* Main Content */}
       <div className="menu-content">
         <div className="logo-section">
@@ -34,10 +43,11 @@ const MainMenu: React.FC<MainMenuProps> = ({ onStartPractice, onTutorial, onSett
                 <span className="button-text">CASUAL</span>
               </span>
             </button>
-            <button className="menu-button menu-button-competitive ui-text" onClick={() => setView('competitive')}>
+            <button className="menu-button menu-button-competitive ui-text" disabled>
               <span className="button-content">
                 <span className="button-icon">🏆</span>
                 <span className="button-text">COMPETITIVE</span>
+                <span className="button-coming-soon">COMING SOON</span>
               </span>
             </button>
             <button 
