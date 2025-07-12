@@ -14,9 +14,11 @@ export class BikeRenderer {
     // Main body - made shorter and less bulky
     const bodyGeometry = new THREE.BoxGeometry(0.25, 0.12, 0.6);
     const bodyMaterial = new THREE.MeshStandardMaterial({
-      color: 0x333333,
+      color: 0xff69b4, // HOT PINK to test changes are working
       metalness: 0.2,
-      roughness: 0.6
+      roughness: 0.6,
+      emissive: 0xff1493, // Bright pink emissive
+      emissiveIntensity: 0.3
     });
     const bodyMesh = new THREE.Mesh(bodyGeometry, bodyMaterial);
     bodyMesh.position.y = 0.18;

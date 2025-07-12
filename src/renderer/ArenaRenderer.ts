@@ -45,6 +45,7 @@ export class ArenaRenderer {
       const segment = new THREE.Mesh(segmentGeometry, segmentMaterial);
       segment.rotation.x = Math.PI / 2;
       segment.rotation.z = startAngle;
+      
       ringGroup.add(segment);
     }
     
@@ -75,6 +76,7 @@ export class ArenaRenderer {
       const segment = new THREE.Mesh(segmentGeometry, segmentMaterial);
       segment.rotation.x = Math.PI / 2;
       segment.rotation.z = startAngle;
+      
       innerRingGroup.add(segment);
     }
     
@@ -88,7 +90,7 @@ export class ArenaRenderer {
     
     const wallMaterial = new THREE.MeshBasicMaterial({ 
       color: 0x2a2a2a, 
-      opacity: 0.2, 
+      opacity: 0.15, // Reduced opacity to make walls less prominent
       transparent: true 
     });
     
@@ -113,35 +115,58 @@ export class ArenaRenderer {
     
     const gridHelper = new THREE.GridHelper(
       gridSize, gridDivisions,
-      0x222222, // grid color (lighter gray)
-      0x222222  // grid color (lighter gray)
+      0x222222, // Normal grid color
+      0x222222  // Normal grid color
     );
     (gridHelper.material as THREE.Material).opacity = 0.15;
     (gridHelper.material as THREE.Material).transparent = true;
     (gridHelper.material as THREE.Material).depthWrite = false;
     gridHelper.position.y = -0.5;
+    
     this.scene.add(gridHelper);
     this.gridHelper = gridHelper; // Track the gridHelper object
   }
 
   public updateRings(scale: number, frameCount: number, isPlayerOutsideRing: boolean): void {
-    // Update ring scale
+    // The danger zone should always be visible, even at minimum size
+    // Only hide rings if they're smaller than the actual minimum game size
+    const minGameScale = this.config.ringMinRadius / this.config.ringInitialRadius; // Actual minimum from config
+    const hideThreshold = minGameScale * 0.8; // Only hide if smaller than 80% of minimum game size
+    
+    if (scale < hideThreshold) {
+      // Completely disable rings that are smaller than the game's minimum
+      this.ringGroup.scale.setScalar(0);
+      this.innerRingGroup.scale.setScalar(0);
+      this.ringGroup.position.set(0, -1000, 0); // Move far below ground
+      this.innerRingGroup.position.set(0, -1000, 0);
+      this.ringGroup.visible = false;
+      this.innerRingGroup.visible = false;
+      
+      // Rings are hidden when too small
+      return;
+    }
+
+    // Update ring scale for visible rings
     this.ringGroup.scale.setScalar(scale);
     this.innerRingGroup.scale.setScalar(scale);
 
     // Keep rings positioned correctly
     this.ringGroup.position.set(0, 0.05, 0);
     this.innerRingGroup.position.set(0, 0.051, 0);
+    
+    // Make sure rings are visible
+    this.ringGroup.visible = true;
+    this.innerRingGroup.visible = true;
 
-    // Optimized pulsing - only update every 4 frames for performance
-    if (frameCount % 4 === 0) {
-      const pulseIntensity = 0.3; // Reduced intensity for performance
-      const timeScale = frameCount * 0.06; // Slower pulsing
+    // Further optimized pulsing - only update every 8 frames for better performance
+    if (frameCount % 8 === 0) {
+      const pulseIntensity = 0.2; // Further reduced intensity for performance
+      const timeScale = frameCount * 0.04; // Slower pulsing
       const pulse = 1 + Math.sin(timeScale) * pulseIntensity;
       
-      const dangerMultiplier = isPlayerOutsideRing ? 2.0 : 1.0; // Reduced multiplier
-      const basePulse = isPlayerOutsideRing ? 0.25 : 0.12; // Slightly reduced opacity changes
-      const innerBasePulse = isPlayerOutsideRing ? 0.15 : 0.08;
+      const dangerMultiplier = isPlayerOutsideRing ? 1.5 : 1.0; // Further reduced multiplier
+      const basePulse = isPlayerOutsideRing ? 0.2 : 0.1; // Further reduced opacity changes
+      const innerBasePulse = isPlayerOutsideRing ? 0.12 : 0.06;
       
       // Apply pulsing to ring segments
       this.ringGroup.children.forEach((child) => {
@@ -163,10 +188,10 @@ export class ArenaRenderer {
       });
     }
     
-    // Rotation effects - optimized spin speed
-    const spinMultiplier = isPlayerOutsideRing ? 1.5 : 1; // Reduced spin multiplier
-    this.ringGroup.rotation.y += this.config.ringSpinSpeed * 2 * spinMultiplier; // Reduced base speed
-    this.innerRingGroup.rotation.y -= this.config.ringSpinSpeed * 1.5 * spinMultiplier;
+    // Rotation effects - further optimized spin speed
+    const spinMultiplier = isPlayerOutsideRing ? 1.2 : 1; // Further reduced spin multiplier
+    this.ringGroup.rotation.y += this.config.ringSpinSpeed * 1.5 * spinMultiplier; // Further reduced base speed
+    this.innerRingGroup.rotation.y -= this.config.ringSpinSpeed * 1.2 * spinMultiplier;
   }
 
   public reset(): void {
@@ -174,6 +199,10 @@ export class ArenaRenderer {
     this.innerRingGroup.scale.setScalar(1.0);
     this.ringGroup.rotation.y = 0;
     this.innerRingGroup.rotation.y = 0;
+    
+    // Make sure rings are visible after reset
+    this.ringGroup.visible = true;
+    this.innerRingGroup.visible = true;
     
     // Reset ring materials
     this.ringGroup.children.forEach((child) => {
@@ -198,9 +227,6 @@ export class ArenaRenderer {
   public setGridVisible(visible: boolean): void {
     if (this.gridHelper) {
       this.gridHelper.visible = visible;
-      console.log(`Grid visibility set to: ${visible}`);
-    } else {
-      console.warn('Grid helper not available when trying to set visibility');
     }
   }
 }

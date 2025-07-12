@@ -7,7 +7,6 @@ export class GameEngine {
   private bikeState: BikeState;
   private bikePhysics: BikePhysics;
   private arena: Arena;
-  private turnQueue: TurnDirection[] = [];
   private frameCount = 0;
   private lastHitFrame = 0;
   private lastDamageType: DamageType = null;
@@ -15,6 +14,10 @@ export class GameEngine {
   private trailFrames: number[] = [];
   private newTrailSegments: { start: THREE.Vector3; end: THREE.Vector3 }[] = [];
   private segmentsToRemove = 0;
+  
+  // Anti-phase: track collision state more aggressively
+  private collisionFrameCount = 0;
+  private lastCollisionNormal: THREE.Vector3 | null = null;
 
   constructor(private config: GameConfig) {
     this.bikePhysics = new BikePhysics(config);
@@ -30,20 +33,47 @@ export class GameEngine {
       trail: [initialPosition.clone()],
       alive: true,
       speed: this.config.bikeSpeed,
+      speedTarget: this.config.speedTarget,
       lastTurnFrame: 0,
-      health: 156, // 30% more health (120 * 1.3)
+      health: 156,
       maxHealth: 156,
       grindOffset: 0,
       grindNormal: null,
       graceFramesRemaining: 0,
       brakeEnergy: this.config.brakeMaxEnergy,
       brakeRechargeDelay: 0,
-      isBraking: false
+      isBraking: false,
+      
+      // Grinding system
+      lastX: initialPosition.x,
+      lastY: initialPosition.z,
+      lastdirX: 0,
+      lastdirY: 1,
+      checkLast: true,
+      
+      rubber: 0,
+      rubberMax: this.config.rubberMax,
+      rubberTime: this.config.rubberTime,
+      collision: false,
+      collideTime: 999,
+      lastSpeed: this.config.bikeSpeed,
+      
+      distF: 999,
+      distL: 999,
+      distR: 999,
+      minDistF: this.config.rubberMinDist,
+      
+      turnQueue: [],
+      cycleDelay: this.config.turnDelayFrames / 60.0,
+      lastTurnTime: 0,
+      
+      accelBase: this.config.accelBase,
+      wallNear: this.config.wallNear
     };
   }
 
   public getBikeState(): BikeState {
-    return { ...this.bikeState };
+    return this.bikeState;
   }
 
   public getArena(): Arena {
@@ -55,7 +85,11 @@ export class GameEngine {
   }
 
   public queueTurn(direction: TurnDirection): void {
-    this.turnQueue.push(direction);
+    // ANTI-PHASE: Don't even queue turns during active collision
+    if (this.collisionFrameCount > 0 || this.bikeState.rubber > 0.5) {
+      return;
+    }
+    this.bikeState.turnQueue.push(direction);
   }
 
   public setBraking(isBraking: boolean): void {
@@ -64,39 +98,60 @@ export class GameEngine {
 
   private updateBrakeSystem(): void {
     if (this.bikeState.isBraking && this.bikeState.brakeEnergy > 0) {
-      // Deplete brake energy while braking
       this.bikeState.brakeEnergy = Math.max(0, this.bikeState.brakeEnergy - this.config.brakeDepletionRate);
       this.bikeState.brakeRechargeDelay = this.config.brakeRechargeDelayFrames;
-      
-      // Debug log every 60 frames (1 second) while braking
-      if (this.frameCount % 60 === 0) {
-        const energyUsed = this.config.brakeMaxEnergy - this.bikeState.brakeEnergy;
-        const brakeProgress = energyUsed / this.config.brakeMaxEnergy;
-        console.log(`Braking: Energy ${this.bikeState.brakeEnergy.toFixed(1)}/100 (${(brakeProgress * 100).toFixed(1)}% used), Progressive braking active`);
-      }
     } else {
-      // Stop braking if no energy
       if (this.bikeState.brakeEnergy <= 0) {
         this.bikeState.isBraking = false;
       }
       
-      // Handle recharge delay
       if (this.bikeState.brakeRechargeDelay > 0) {
         this.bikeState.brakeRechargeDelay--;
       } else {
-        // Recharge brake energy
-        const oldEnergy = this.bikeState.brakeEnergy;
         this.bikeState.brakeEnergy = Math.min(
           this.config.brakeMaxEnergy, 
           this.bikeState.brakeEnergy + this.config.brakeRechargeRate
         );
-        
-        // Debug log when recharging starts or when fully recharged
-        if (oldEnergy < this.config.brakeMaxEnergy && this.bikeState.brakeEnergy === this.config.brakeMaxEnergy) {
-          console.log(`Brake fully recharged: ${this.bikeState.brakeEnergy}%`);
-        }
       }
     }
+  }
+
+  private checkCollisionAtPosition(position: THREE.Vector3, skipRecent: number = 5): boolean {
+    // Check boundary collision
+    const limit = this.config.boundaryLimit - 0.08;
+    if (Math.abs(position.x) > limit || Math.abs(position.z) > limit) {
+      return true;
+    }
+    
+    // Check trail collision - only consider trail segments that are old enough to be rendered
+    const safeDistance = this.config.trailWidth + 0.03; // Reduced margin for stricter detection
+    const maxCheckIndex = Math.max(0, this.bikeState.trail.length - skipRecent);
+    
+    // Use line segment collision detection for better accuracy
+    for (let i = 0; i < maxCheckIndex - 1; i++) {
+      const segmentStart = this.bikeState.trail[i];
+      const segmentEnd = this.bikeState.trail[i + 1];
+      
+      // Skip very short segments
+      if (segmentStart.distanceTo(segmentEnd) < 0.01) continue;
+      
+      // Check distance to line segment
+      const segmentDir = new THREE.Vector3().subVectors(segmentEnd, segmentStart);
+      const segmentLength = segmentDir.length();
+      segmentDir.normalize();
+      
+      const toStart = new THREE.Vector3().subVectors(position, segmentStart);
+      const projLength = THREE.MathUtils.clamp(toStart.dot(segmentDir), 0, segmentLength);
+      
+      const closestPoint = segmentStart.clone().add(segmentDir.clone().multiplyScalar(projLength));
+      const distance = position.distanceTo(closestPoint);
+      
+      if (distance < safeDistance) {
+        return true;
+      }
+    }
+    
+    return false;
   }
 
   public update(): { healthChanged: boolean; newHealth: number } {
@@ -109,58 +164,89 @@ export class GameEngine {
     // Update brake system
     this.updateBrakeSystem();
 
-    // Handle turns
-    const framesSinceLastTurn = this.frameCount - this.bikeState.lastTurnFrame;
-    const canTurn = framesSinceLastTurn >= this.config.turnDelayFrames;
-    
-    if (canTurn && this.turnQueue.length > 0) {
-      // Create trail segment from previous position to current position
-      if (this.bikeState.trail.length > 0) {
-        const lastPoint = this.bikeState.trail[this.bikeState.trail.length - 1];
-        this.newTrailSegments.push({ start: lastPoint.clone(), end: this.bikeState.position.clone() });
-      }
-      
-      this.bikeState.trail.push(this.bikeState.position.clone());
-      this.trailFrames.push(this.frameCount);
-      
-      const turn = this.turnQueue.shift()!;
-      if (turn === 'left') {
-        this.bikeState.rotation += Math.PI / 2;
-      } else if (turn === 'right') {
-        this.bikeState.rotation -= Math.PI / 2;
-      }
-      this.bikeState.lastTurnFrame = this.frameCount;
-    }
-
-    // Move bike
+    // Calculate direction and movement
     const direction = new THREE.Vector3(
       Math.sin(this.bikeState.rotation),
       0,
       Math.cos(this.bikeState.rotation)
     );
     
-    // Apply progressive brake speed reduction if braking
     let currentSpeed = this.bikeState.speed;
     if (this.bikeState.isBraking && this.bikeState.brakeEnergy > 0) {
-      // Progressive braking: speed reduction is proportional to energy used
       const energyUsed = this.config.brakeMaxEnergy - this.bikeState.brakeEnergy;
-      const brakeProgress = energyUsed / this.config.brakeMaxEnergy; // 0 to 1
-      
-      // Speed reduction goes from 1.0 (no reduction) to brakeSpeedReduction (max reduction)
+      const brakeProgress = energyUsed / this.config.brakeMaxEnergy;
       const speedMultiplier = 1.0 - (brakeProgress * (1.0 - this.config.brakeSpeedReduction));
       currentSpeed *= speedMultiplier;
+    }
+    
+    // ANTI-PHASE: Block ALL turns during collision recovery
+    const framesSinceLastTurn = this.frameCount - this.bikeState.lastTurnFrame;
+    const canTurn = framesSinceLastTurn >= this.config.turnDelayFrames && 
+                   this.collisionFrameCount === 0 && 
+                   this.bikeState.rubber < 0.1;
+    
+    if (canTurn && this.bikeState.turnQueue.length > 0) {
+      const turn = this.bikeState.turnQueue[0];
       
-      // Debug log speed reduction every 30 frames while braking
-      if (this.frameCount % 30 === 0) {
-        console.log(`Progressive braking: Energy ${this.bikeState.brakeEnergy.toFixed(1)}/100, Progress ${(brakeProgress * 100).toFixed(1)}%, Speed ${(speedMultiplier * 100).toFixed(1)}%`);
+      // Calculate new rotation
+      let newRotation = this.bikeState.rotation;
+      if (turn === 'left') {
+        newRotation += Math.PI / 2;
+      } else if (turn === 'right') {
+        newRotation -= Math.PI / 2;
+      }
+      
+      // STRICT validation: Check if we're near any collision
+      const testPositions = [];
+      const newDir = new THREE.Vector3(Math.sin(newRotation), 0, Math.cos(newRotation));
+      
+      // Check current position and multiple future positions
+      testPositions.push(this.bikeState.position);
+      for (let dist = 0.05; dist <= currentSpeed * 2; dist += 0.05) {
+        testPositions.push(this.bikeState.position.clone().add(direction.clone().multiplyScalar(dist)));
+        testPositions.push(this.bikeState.position.clone().add(newDir.clone().multiplyScalar(dist)));
+      }
+      
+      let turnSafe = true;
+      for (const testPos of testPositions) {
+        if (this.checkCollisionAtPosition(testPos, 3)) {
+          turnSafe = false;
+          break;
+        }
+      }
+      
+      if (turnSafe) {
+        // Create trail segment at turn point
+        if (this.bikeState.trail.length > 0) {
+          const lastPoint = this.bikeState.trail[this.bikeState.trail.length - 1];
+          if (lastPoint.distanceTo(this.bikeState.position) > 0.05) {
+            this.newTrailSegments.push({ start: lastPoint.clone(), end: this.bikeState.position.clone() });
+          }
+        }
+        
+        this.bikeState.trail.push(this.bikeState.position.clone());
+        this.trailFrames.push(this.frameCount);
+        
+        this.bikeState.rotation = newRotation;
+        this.bikeState.turnQueue.shift();
+        this.bikeState.lastTurnFrame = this.frameCount;
+      } else {
+        // Clear queue on failed turn
+        this.bikeState.turnQueue = [];
       }
     }
     
+    // Clear turn queue if we're in collision
+    if (this.collisionFrameCount > 0 || this.bikeState.rubber > 0.1) {
+      this.bikeState.turnQueue = [];
+    }
+
+    // MOVEMENT: Check for collisions
     const potentialPosition = this.bikeState.position.clone().add(
       direction.multiplyScalar(currentSpeed)
     );
 
-    // Check collisions
+    // Use collision system
     const collision = this.bikePhysics.checkCollisions(
       potentialPosition,
       [...this.bikeState.trail, potentialPosition],
@@ -169,58 +255,85 @@ export class GameEngine {
 
     let newPosition = collision.corrected.clone();
     newPosition = this.bikePhysics.clampToBoundary(newPosition);
-
-    // Handle collision damage
     let healthChanged = false;
-    let headOn = false;
     
+    // GRINDING MECHANICS - restored
     if (collision.hit && collision.normal) {
-      const push = direction.dot(collision.normal);
+      const normalizedNormal = collision.normal.clone().normalize();
+      const normalizedDirection = direction.clone().normalize();
+      const dotProduct = normalizedDirection.dot(normalizedNormal);
       
-      // Simplified and correct head-on collision detection:
-      // For head-on collision: bike moving directly into wall (push should be strongly negative)
-      // For grinding: bike moving parallel to wall (push should be close to 0)
-      // The dot product tells us how directly we're hitting the wall
+      this.bikeState.collision = true;
+      this.lastHitFrame = this.frameCount;
+      this.lastDamageType = 'collision';
+      this.lastCollisionNormal = normalizedNormal.clone();
       
-             // Normalize the collision normal to ensure consistent dot product calculations
-       const normalizedNormal = collision.normal.clone().normalize();
-       const normalizedDirection = direction.clone().normalize();
-       const normalizedPush = normalizedDirection.dot(normalizedNormal);
-       
-       // Debug logging to understand collision values
-       if (this.frameCount % 30 === 0) {
-         console.log(`Collision Debug: normalizedPush=${normalizedPush.toFixed(3)}, rawPush=${push.toFixed(3)}, direction=(${direction.x.toFixed(2)}, ${direction.z.toFixed(2)}), normal=(${collision.normal.x.toFixed(2)}, ${collision.normal.z.toFixed(2)})`);
-       }
+      // Increment collision frame count
+      this.collisionFrameCount = 10; // Stay in collision state for 10 frames
       
-             // Head-on collision: using normalized vectors for consistent detection
-       // For head-on collision, normalized push should be significantly negative (moving into wall)
-       // For grinding, normalized push should be close to 0 (moving parallel to wall)
-       if (normalizedPush < -0.6) {
-        // True head-on collision - moving directly into the wall
-        headOn = true;
-        this.bikeState.grindOffset = Math.min(this.bikeState.grindOffset + 0.02, 0.3);
-        this.bikeState.health = Math.max(0, this.bikeState.health - 1.2);
-        this.lastHitFrame = this.frameCount;
-        this.lastDamageType = 'collision';
-        healthChanged = true;
-                 console.log(`HEAD-ON COLLISION: normalizedPush=${normalizedPush.toFixed(3)}, health=${this.bikeState.health.toFixed(1)}`);
-       } else {
-         // Grinding parallel to wall or glancing collision, no damage
-         this.bikeState.grindOffset = Math.min(this.bikeState.grindOffset + 0.01, 0.3);
-         if (this.frameCount % 60 === 0) {
-           console.log(`GRINDING: normalizedPush=${normalizedPush.toFixed(3)}, no damage`);
-         }
+      // Head-on collision: accumulate damage
+      if (dotProduct < -0.5) {
+        this.bikeState.rubber += currentSpeed * 1.5;
+        
+        // Die if too much rubber accumulated
+        if (this.bikeState.rubber > this.bikeState.rubberMax) {
+          this.bikeState.alive = false;
+          return { healthChanged: true, newHealth: 0 };
+        }
+        
+        // ANTI-PHASE: For head-on collisions, stop movement entirely
+        newPosition = this.bikeState.position.clone();
+      } 
+      // Grinding: try to slide along wall
+      else if (Math.abs(dotProduct) < 0.5) {
+        const slideDirection = direction.clone().sub(
+          normalizedNormal.clone().multiplyScalar(dotProduct)
+        ).normalize();
+        
+        const slideMovement = slideDirection.multiplyScalar(currentSpeed * 0.7);
+        const slidePosition = this.bikeState.position.clone().add(slideMovement);
+        
+        // Validate slide position
+        if (!this.checkCollisionAtPosition(slidePosition, 3)) {
+          newPosition = slidePosition;
+          newPosition = this.bikePhysics.clampToBoundary(newPosition);
+        } else {
+          // Can't slide, stay put
+          newPosition = this.bikeState.position.clone();
+        }
+        
+        // Gradual rubber decay while grinding
+        if (this.bikeState.rubber > 0) {
+          this.bikeState.rubber -= this.bikeState.rubber * 0.03;
+        }
       }
-      newPosition.add(collision.normal.clone().multiplyScalar(-this.bikeState.grindOffset));
     } else {
-      this.bikeState.grindOffset = 0;
+      // No collision - decay rubber and collision state
+      this.bikeState.collision = false;
+      if (this.collisionFrameCount > 0) {
+        this.collisionFrameCount--;
+      }
+      if (this.bikeState.rubber > 0) {
+        this.bikeState.rubber -= this.bikeState.rubber * 0.08;
+        if (this.bikeState.rubber < 0.001) {
+          this.bikeState.rubber = 0;
+        }
+      }
+    }
+
+    // FINAL SAFETY CHECK: Never allow position inside collision
+    if (this.checkCollisionAtPosition(newPosition, 3)) {
+      // Revert to current position
+      newPosition = this.bikeState.position.clone();
+      this.collisionFrameCount = 10;
+      this.bikeState.rubber = Math.min(this.bikeState.rubberMax, this.bikeState.rubber + 1);
     }
 
     // Update position
     this.bikeState.position = newPosition;
 
     // Handle zone damage
-    const isOutsideRing = this.arena.isPositionOutsideRing(newPosition);
+    const isOutsideRing = this.arena.isPositionOutsideRing(this.bikeState.position);
     
     if (isOutsideRing) {
       this.outsideRingFrames++;
@@ -231,9 +344,9 @@ export class GameEngine {
       this.outsideRingFrames = 0;
     }
 
-    // Handle health regeneration
+    // Health regeneration
     const framesSinceHit = this.frameCount - this.lastHitFrame;
-    if (!headOn && !isOutsideRing && framesSinceHit > this.config.regenDelayFrames && this.bikeState.health < this.bikeState.maxHealth) {
+    if (!this.bikeState.collision && !isOutsideRing && framesSinceHit > this.config.regenDelayFrames && this.bikeState.health < this.bikeState.maxHealth) {
       const regenRate = this.lastDamageType === 'zone' ? this.config.slowRegenRate : this.config.fastRegenRate;
       this.bikeState.health = Math.min(this.bikeState.maxHealth, this.bikeState.health + regenRate);
       healthChanged = true;
@@ -242,76 +355,62 @@ export class GameEngine {
     // Update arena
     this.arena.shrinkRing();
 
-    // Add to trail - denser segments for much longer visible trails
-    const distanceThreshold = 0.3; // Denser segments = longer visible trail
-    if (this.bikeState.trail.length === 0 || newPosition.distanceTo(this.bikeState.trail[this.bikeState.trail.length - 1]) > distanceThreshold) {
-      // Create trail segment if we have a previous point
+    // Add to trail
+    const distanceThreshold = 0.3;
+    if (this.bikeState.trail.length === 0 || this.bikeState.position.distanceTo(this.bikeState.trail[this.bikeState.trail.length - 1]) > distanceThreshold) {
       if (this.bikeState.trail.length > 0) {
         const lastPoint = this.bikeState.trail[this.bikeState.trail.length - 1];
-        this.newTrailSegments.push({ start: lastPoint.clone(), end: newPosition.clone() });
+        this.newTrailSegments.push({ start: lastPoint.clone(), end: this.bikeState.position.clone() });
       }
       
-      this.bikeState.trail.push(newPosition.clone());
+      this.bikeState.trail.push(this.bikeState.position.clone());
       this.trailFrames.push(this.frameCount);
     }
 
-    // Trim old trail segments - ensure collision and rendering stay in sync
-    let trimmedCount = 0;
-    const initialTrailLength = this.bikeState.trail.length;
-    while (this.trailFrames.length > 0 && this.frameCount - this.trailFrames[0] > this.config.trailMaxFrames) {
-      this.trailFrames.shift();
-      if (this.bikeState.trail.length > 0) {
-        this.bikeState.trail.shift();
-      }
-      this.segmentsToRemove++;
-      trimmedCount++;
-    }
+    // Trail cleanup
+    let segmentsRemoved = 0;
+    const maxFrames = this.config.trailMaxFrames;
     
-    // Extra safeguard: if trail gets too long due to any sync issues, trim it
-    const maxAllowedTrailLength = Math.ceil(this.config.trailMaxFrames / 60) * 4; // Very generous limit
-    while (this.bikeState.trail.length > maxAllowedTrailLength) {
-      this.bikeState.trail.shift();
-      if (this.trailFrames.length > 0) {
+    if (this.frameCount % 10 === 0) {
+      const frameThreshold = this.frameCount - maxFrames;
+      
+      while (this.trailFrames.length > 1 && this.trailFrames[0] < frameThreshold) {
         this.trailFrames.shift();
-      }
-      this.segmentsToRemove++;
-      trimmedCount++;
-    }
-    
-    // Debug logging to track trail management
-    if (this.frameCount % 300 === 0) { // Log every 5 seconds
-      console.log(`Trail Status: Length=${this.bikeState.trail.length}, Frames=${this.trailFrames.length}, MaxAge=${this.frameCount - (this.trailFrames[0] || this.frameCount)}, Segments to remove: ${this.segmentsToRemove}`);
-    }
-    if (trimmedCount > 0) {
-      console.log(`Trimmed ${trimmedCount} trail segments. Length: ${initialTrailLength} -> ${this.bikeState.trail.length}`);
-    }
-
-    // Grace period system - handle death protection
-    if (this.bikeState.health <= 0) {
-      if (this.bikeState.graceFramesRemaining <= 0) {
-        // Start grace period when health hits 0
-        this.bikeState.graceFramesRemaining = this.config.graceFrames;
-        console.log(`Grace period started: ${this.config.graceFrames} frames protection`);
-      } else {
-        // Count down grace frames
-        this.bikeState.graceFramesRemaining--;
-        
-        // If still taking damage during grace period, reduce grace time faster
-        if (headOn || isOutsideRing) {
-          this.bikeState.graceFramesRemaining -= 2; // Faster countdown if still hitting things
+        if (this.bikeState.trail.length > 1) {
+          this.bikeState.trail.shift();
+          segmentsRemoved++;
         }
       }
       
-      // Only die if grace period expired
+      const maxTrailLength = 300;
+      while (this.bikeState.trail.length > maxTrailLength) {
+        this.bikeState.trail.shift();
+        this.trailFrames.shift();
+        segmentsRemoved++;
+      }
+    }
+    
+    this.segmentsToRemove = segmentsRemoved;
+
+    // Grace period system
+    if (this.bikeState.health <= 0) {
+      if (this.bikeState.graceFramesRemaining <= 0) {
+        this.bikeState.graceFramesRemaining = this.config.graceFrames;
+      } else {
+        this.bikeState.graceFramesRemaining--;
+        
+        if (this.bikeState.collision || isOutsideRing) {
+          this.bikeState.graceFramesRemaining -= 2;
+        }
+      }
+      
       if (this.bikeState.graceFramesRemaining <= 0) {
         this.bikeState.alive = false;
       }
     } else {
-      // Reset grace period if health is above 0
       this.bikeState.graceFramesRemaining = 0;
     }
 
-    // Ensure health doesn't go below -10 (prevent infinite grace abuse)
     this.bikeState.health = Math.max(-10, this.bikeState.health);
 
     return { healthChanged, newHealth: this.bikeState.health };
@@ -321,7 +420,6 @@ export class GameEngine {
     this.bikeState = this.createInitialBikeState();
     this.bikePhysics.resetGrindDepthMap();
     this.arena.reset();
-    this.turnQueue = [];
     this.frameCount = 0;
     this.lastHitFrame = 0;
     this.lastDamageType = null;
@@ -329,6 +427,8 @@ export class GameEngine {
     this.trailFrames = [0];
     this.newTrailSegments = [];
     this.segmentsToRemove = 0;
+    this.collisionFrameCount = 0;
+    this.lastCollisionNormal = null;
   }
 
   public getTrailFrames(): number[] {
@@ -337,13 +437,13 @@ export class GameEngine {
 
   public getNewTrailSegments(): { start: THREE.Vector3; end: THREE.Vector3 }[] {
     const segments = [...this.newTrailSegments];
-    this.newTrailSegments = []; // Clear after returning
+    this.newTrailSegments = [];
     return segments;
   }
 
   public getSegmentsToRemove(): number {
     const count = this.segmentsToRemove;
-    this.segmentsToRemove = 0; // Reset after returning
+    this.segmentsToRemove = 0;
     return count;
   }
 
@@ -357,9 +457,7 @@ export class GameEngine {
   }
 
   public getCollisionSafeTrailLength(): number {
-    // Return the number of trail segments that are safe to check for collision
-    // This should match the number of segments in the renderer
-    return Math.max(0, this.bikeState.trail.length - 10); // Skip recent segments
+    return Math.max(0, this.bikeState.trail.length - 10);
   }
 
   public getGraceFramesRemaining(): number {

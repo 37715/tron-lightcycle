@@ -2,151 +2,222 @@ import * as THREE from 'three';
 import { GameConfig } from '../engine/types';
 
 export class TrailRenderer {
-  private instancedMesh: THREE.InstancedMesh;
-  private segmentGeometry: THREE.BoxGeometry;
-  private segmentMaterial: THREE.MeshBasicMaterial;
-  private segmentCount = 0;
-  private maxSegments: number;
+  protected mesh!: THREE.InstancedMesh;
+  private segmentCount: number = 0;
+  private maxSegments: number = 1000;
   private segmentQueue: { matrix: THREE.Matrix4; age: number }[] = [];
   private tempMatrix = new THREE.Matrix4();
   private tempPosition = new THREE.Vector3();
   private tempQuaternion = new THREE.Quaternion();
   private tempScale = new THREE.Vector3();
+  
+  private minRenderLength: number = 0.05;
+  private bikeHeight: number = 0.22; // Shorter to not poke out of bike
+  
+  private frameUpdateCount = 0;
 
-  constructor(private scene: THREE.Scene, private config: GameConfig) {
-    // Set a very generous maximum number of segments that can never be reached
-    // under normal gameplay. We simply double the maximum number of frames the
-    // trail is allowed to live. Even if a new segment were created EVERY frame,
-    // this capacity would still not be exceeded.
-    this.maxSegments = this.config.trailMaxFrames * 2; // e.g. 7200 * 2 = 14 400
-    
-    console.log(`TrailRenderer initialized: maxSegments=${this.maxSegments}, trailMaxFrames=${this.config.trailMaxFrames}, expectedDistance=${this.maxSegments}`);
-    
-    // Create shared geometry for all trail segments
-    this.segmentGeometry = new THREE.BoxGeometry(
-      this.config.trailWidth, 
-      this.config.trailHeight, 
-      1.0 // Base length, will be scaled per instance
-    );
-    
-    // Create efficient material
-    this.segmentMaterial = new THREE.MeshBasicMaterial({
-      color: 0x3a7bd5,
-      transparent: true,
-      opacity: 0.5, // Good visibility
-      depthWrite: true,
-      side: THREE.DoubleSide
-    });
-    
-    // Create instanced mesh for ultra-performance
-    this.instancedMesh = new THREE.InstancedMesh(
-      this.segmentGeometry, 
-      this.segmentMaterial, 
-      this.maxSegments
-    );
-    this.instancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    this.instancedMesh.count = 0; // Start with 0 visible instances
-    this.instancedMesh.frustumCulled = false; // Disable frustum culling for better performance
-    
-    this.scene.add(this.instancedMesh);
+  constructor(scene: THREE.Scene, private config: GameConfig, private color: number = 0x00ffff) {
+    this.createTrailMesh(scene);
   }
 
-  public updateTrailGeometry(): void {
-    // This method is called for compatibility but we handle trail updates differently now
-    // The actual trail rendering is handled by createTrailSegment calls
+  private createTrailMesh(scene: THREE.Scene): void {
+    const geometry = new THREE.BoxGeometry(1, this.config.trailHeight, 1);
+    
+    const material = new THREE.MeshStandardMaterial({
+      color: this.color,
+      metalness: 0.1,
+      roughness: 0.8,
+      emissive: new THREE.Color(this.color),
+      emissiveIntensity: 0.4,
+      transparent: false,
+      depthWrite: true
+    });
+
+    this.mesh = new THREE.InstancedMesh(geometry, material, this.maxSegments);
+    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.mesh.count = 0;
+    this.mesh.frustumCulled = false;
+    
+    // Initialize all matrices to zero scale to prevent phantom geometry
+    for (let i = 0; i < this.maxSegments; i++) {
+      this.tempMatrix.makeScale(0, 0, 0);
+      this.mesh.setMatrixAt(i, this.tempMatrix);
+    }
+    
+    scene.add(this.mesh);
   }
 
   public createTrailSegment(start: THREE.Vector3, end: THREE.Vector3): void {
-    // Prevent exceeding the maximum; rely on GameEngine to signal when a segment should be
-    // removed so that the visual trail always stays in sync with collision data.
-    // If we reach the capacity, simply skip adding new segments until GameEngine trims old ones.
     if (this.segmentCount >= this.maxSegments) {
-      // This should be extremely rare because maxSegments is calculated to comfortably
-      // exceed the number of segments that can exist given trailMaxFrames.
-      // Log once per overflow attempt for debugging but do NOT remove any segment here.
-      console.warn(`TrailRenderer: Max segments (${this.maxSegments}) reached! Segment creation skipped to maintain sync with GameEngine.`);
       return;
     }
 
     const direction = new THREE.Vector3().subVectors(end, start);
-    let length = direction.length();
-
-    // Ensure we still render very short segments so that any collidable trail
-    // is always visible to the player. Clamp to a small minimum length.
-    const MIN_RENDER_LENGTH = 0.05; // 5 cm visual stub
-    if (length < MIN_RENDER_LENGTH) {
-      length = MIN_RENDER_LENGTH;
+    const length = direction.length();
+    
+    if (length < this.minRenderLength) {
+      return;
     }
 
-    // Calculate segment position and orientation
     const midpoint = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
+
+    // Simplified growing height - start at bike height
+    const currentHeight = this.bikeHeight;
     
-    // Create transformation matrix
     this.tempPosition.copy(midpoint);
-    this.tempQuaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction.normalize());
-    this.tempScale.set(1, 1, length); // Scale Z to match segment length
-    
+    this.tempPosition.y = currentHeight / 2;
+
+    this.tempScale.set(
+      this.config.trailWidth,
+      currentHeight / this.config.trailHeight,
+      length
+    );
+
+    if (length > 0.001) {
+      direction.normalize();
+      this.tempQuaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
+    } else {
+      this.tempQuaternion.set(0, 0, 0, 1);
+    }
+
     this.tempMatrix.compose(this.tempPosition, this.tempQuaternion, this.tempScale);
     
-    // Add to queue and set matrix
-    this.segmentQueue.push({ matrix: this.tempMatrix.clone(), age: 0 });
-    this.instancedMesh.setMatrixAt(this.segmentCount, this.tempMatrix);
-    
-    this.segmentCount++;
-    this.instancedMesh.count = this.segmentCount;
-    this.instancedMesh.instanceMatrix.needsUpdate = true;
+    // Strict validation
+    if (this.isValidMatrix(this.tempMatrix)) {
+      this.mesh.setMatrixAt(this.segmentCount, this.tempMatrix);
+      
+      this.segmentQueue.push({
+        matrix: this.tempMatrix.clone(),
+        age: 0
+      });
+      
+      this.segmentCount++;
+      this.mesh.count = this.segmentCount;
+    }
   }
 
   public removeOldestTrailSegment(): void {
-    if (this.segmentCount <= 0) {
-      console.warn('TrailRenderer: Attempted to remove segment but count is 0');
-      return;
-    }
-    
-    console.log(`TrailRenderer: Removing oldest segment. Current count: ${this.segmentCount}`);
-    
+    if (this.segmentCount <= 0) return;
+
     // Remove from queue
-    if (this.segmentQueue.length > 0) {
-      this.segmentQueue.shift();
+    this.segmentQueue.shift();
+    
+    // Shift all matrices down
+    for (let i = 0; i < this.segmentCount - 1; i++) {
+      this.mesh.getMatrixAt(i + 1, this.tempMatrix);
+      this.mesh.setMatrixAt(i, this.tempMatrix);
     }
     
-    // Shift all matrices down by one
-    for (let i = 0; i < this.segmentCount - 1; i++) {
-      this.instancedMesh.getMatrixAt(i + 1, this.tempMatrix);
-      this.instancedMesh.setMatrixAt(i, this.tempMatrix);
-    }
+    // Clear the last position with zero scale
+    this.tempMatrix.makeScale(0, 0, 0);
+    this.mesh.setMatrixAt(this.segmentCount - 1, this.tempMatrix);
     
     this.segmentCount--;
-    this.instancedMesh.count = this.segmentCount;
-    this.instancedMesh.instanceMatrix.needsUpdate = true;
+    this.mesh.count = this.segmentCount;
+  }
+
+  public updateTrailGeometry(): void {
+    this.frameUpdateCount++;
     
-    console.log(`TrailRenderer: Removed segment. New count: ${this.segmentCount}`);
-  }
-
-  public trimTrail(maxSegments: number): void {
-    while (this.segmentCount > maxSegments) {
-      this.removeOldestTrailSegment();
+    // Update matrices less frequently
+    if (this.frameUpdateCount % 2 === 0) {
+      if (this.mesh.instanceMatrix) {
+        this.mesh.instanceMatrix.needsUpdate = true;
+      }
     }
-  }
-
-  public clearAll(): void {
-    this.segmentCount = 0;
-    this.instancedMesh.count = 0;
-    this.segmentQueue = [];
-    this.instancedMesh.instanceMatrix.needsUpdate = true;
-  }
-
-  public reset(): void {
-    this.clearAll();
+    
+    // Simple height growth - grow segments over time
+    if (this.frameUpdateCount % 5 === 0) {
+      let needsUpdate = false;
+      
+      this.segmentQueue.forEach((segment, index) => {
+        segment.age++;
+        
+        // Grow height over 7 frames (faster growth)
+        if (segment.age <= 7) {
+          const growthProgress = segment.age / 7;
+          const targetHeight = this.bikeHeight + (this.config.trailHeight - this.bikeHeight) * growthProgress;
+          
+          // Decompose and update
+          segment.matrix.decompose(this.tempPosition, this.tempQuaternion, this.tempScale);
+          this.tempPosition.y = targetHeight / 2;
+          this.tempScale.y = targetHeight / this.config.trailHeight;
+          
+          // Validate before updating
+          this.tempMatrix.compose(this.tempPosition, this.tempQuaternion, this.tempScale);
+          
+          if (this.isValidMatrix(this.tempMatrix)) {
+            segment.matrix.copy(this.tempMatrix);
+            
+            if (index < this.segmentCount) {
+              this.mesh.setMatrixAt(index, this.tempMatrix);
+              needsUpdate = true;
+            }
+          }
+        }
+      });
+      
+      if (needsUpdate) {
+        this.mesh.instanceMatrix.needsUpdate = true;
+      }
+    }
   }
 
   public getTrailMeshCount(): number {
     return this.segmentCount;
   }
 
+  public clearAllTrails(): void {
+    this.segmentCount = 0;
+    this.mesh.count = 0;
+    this.segmentQueue = [];
+    
+    // Clear all matrices to prevent phantom geometry
+    for (let i = 0; i < this.maxSegments; i++) {
+      this.tempMatrix.makeScale(0, 0, 0);
+      this.mesh.setMatrixAt(i, this.tempMatrix);
+    }
+    
+    if (this.mesh.instanceMatrix) {
+      this.mesh.instanceMatrix.needsUpdate = true;
+    }
+  }
+
   public dispose(): void {
-    this.scene.remove(this.instancedMesh);
-    this.segmentGeometry.dispose();
-    this.segmentMaterial.dispose();
+    if (this.mesh) {
+      this.mesh.geometry.dispose();
+      if (this.mesh.material instanceof THREE.Material) {
+        this.mesh.material.dispose();
+      }
+      this.mesh.parent?.remove(this.mesh);
+    }
+    
+    this.segmentQueue = [];
+    this.segmentCount = 0;
+  }
+
+  private isValidMatrix(matrix: THREE.Matrix4): boolean {
+    const elements = matrix.elements;
+    
+    // Check all matrix elements
+    for (let i = 0; i < elements.length; i++) {
+      if (!isFinite(elements[i]) || isNaN(elements[i])) {
+        return false;
+      }
+    }
+    
+    // Decompose and validate components
+    matrix.decompose(this.tempPosition, this.tempQuaternion, this.tempScale);
+    
+    // Strict validation
+    return (
+      isFinite(this.tempPosition.x) && isFinite(this.tempPosition.y) && isFinite(this.tempPosition.z) &&
+      isFinite(this.tempQuaternion.x) && isFinite(this.tempQuaternion.y) && isFinite(this.tempQuaternion.z) && isFinite(this.tempQuaternion.w) &&
+      isFinite(this.tempScale.x) && isFinite(this.tempScale.y) && isFinite(this.tempScale.z) &&
+      Math.abs(this.tempPosition.x) < 100 && Math.abs(this.tempPosition.y) < 100 && Math.abs(this.tempPosition.z) < 100 &&
+      this.tempScale.x > 0.001 && this.tempScale.y > 0.001 && this.tempScale.z > 0.001 &&
+      this.tempScale.x < 50 && this.tempScale.y < 50 && this.tempScale.z < 50
+    );
   }
 }
+

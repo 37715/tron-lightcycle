@@ -52,6 +52,11 @@ const Game3D: React.FC<Game3DProps> = ({
   const isPausedRef = useRef<boolean>(isPaused);
   const countdownRef = useRef<number | null>(countdown);
   const onGameOverRef = useRef<typeof onGameOver>(onGameOver);
+  
+  // Frame rate limiting for better performance
+  const lastFrameTimeRef = useRef<number>(0);
+  const targetFPS = 60;
+  const frameInterval = 1000 / targetFPS;
 
   // Sync refs when corresponding state/props change
   useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
@@ -105,11 +110,19 @@ const Game3D: React.FC<Game3DProps> = ({
     arenaRendererRef.current.setGridVisible(visualSettings.showGrid);
   }, []); // <-- Remove visualSettings from dependency array
 
-  // Stable animation loop
-  const animate = useCallback(() => {
+  // Stable animation loop with frame rate limiting
+  const animate = useCallback((currentTime: number) => {
     if (!rendererRef.current || !sceneRef.current || !cameraRef.current) return;
     if (!gameEngineRef.current || !bikeRendererRef.current || !trailRendererRef.current ||
         !arenaRendererRef.current || !cameraControllerRef.current) return;
+
+    // Frame rate limiting
+    const deltaTime = currentTime - lastFrameTimeRef.current;
+    if (deltaTime < frameInterval) {
+      animationIdRef.current = requestAnimationFrame(animate);
+      return;
+    }
+    lastFrameTimeRef.current = currentTime;
 
     // Only update game when playing and not paused / counting down
     if (gameStateRef.current === 'playing' && !isPausedRef.current && countdownRef.current === null) {
@@ -137,19 +150,62 @@ const Game3D: React.FC<Game3DProps> = ({
         cameraController.getVisualRotation()
       );
 
-      trailRendererRef.current.updateTrailGeometry();
+      // Handle trail updates in the correct order: remove first, then add, then update
+      // 1. Remove old segments first
+      const pendingRemovals = gameEngineRef.current.getSegmentsToRemove();
+      if (pendingRemovals > 0) {
+        const availableSegments = trailRendererRef.current.getTrailMeshCount();
+        const removals = Math.min(pendingRemovals, availableSegments);
+        
+        for (let i = 0; i < removals; i++) {
+          trailRendererRef.current.removeOldestTrailSegment();
+        }
+      }
 
-      // Handle new & old trail segments
-      gameEngineRef.current.getNewTrailSegments().forEach(segment => {
+      // 2. Add new segments
+      const newSegments = gameEngineRef.current.getNewTrailSegments();
+      newSegments.forEach(segment => {
         trailRendererRef.current?.createTrailSegment(segment.start, segment.end);
       });
 
-      // Remove only as many segments as currently exist to keep visual and collision data in sync
-      const pendingRemovals = gameEngineRef.current.getSegmentsToRemove();
-      const availableSegments = trailRendererRef.current.getTrailMeshCount();
-      const removals = Math.min(pendingRemovals, availableSegments);
-      for (let i = 0; i < removals; i++) {
-        trailRendererRef.current.removeOldestTrailSegment();
+      // 3. Update trail geometry last
+      trailRendererRef.current.updateTrailGeometry();
+
+      // Debug: Check for objects near center more frequently to catch floating geometry
+      if (gameEngineRef.current.getFrameCount() % 120 === 0) { // Every 2 seconds instead of 5
+        const centerObjects: any[] = [];
+        sceneRef.current.traverse((object) => {
+          if (object.position.distanceTo(new THREE.Vector3(0, 0, 0)) < 3) { // Closer to center
+            centerObjects.push({
+              name: object.name || 'unnamed',
+              type: object.type,
+              position: object.position.toArray(),
+              visible: object.visible,
+              scale: object.scale.toArray(),
+              material: (object as any).material ? {
+                color: (object as any).material.color?.getHex(),
+                opacity: (object as any).material.opacity
+              } : null
+            });
+          }
+        });
+        if (centerObjects.length > 0) {
+          console.log('Objects near center:', centerObjects);
+          
+          // Try to identify and remove any suspicious objects
+          sceneRef.current.traverse((object) => {
+            if (object.position.distanceTo(new THREE.Vector3(0, 0, 0)) < 2 && 
+                object.visible && 
+                !object.name.includes('ringSegment') &&
+                !object.name.includes('camera') &&
+                !object.name.includes('light') &&
+                object.type === 'Mesh') {
+              console.warn('Removing suspicious center object:', object.name, object.type);
+              object.visible = false;
+              object.scale.setScalar(0);
+            }
+          });
+        }
       }
 
       const isOutsideRing = arena.isPositionOutsideRing(bikeState.position);

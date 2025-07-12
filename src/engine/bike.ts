@@ -7,7 +7,7 @@ export class BikePhysics {
   constructor(private config: GameConfig) {}
 
   public clampToBoundary(pos: THREE.Vector3): THREE.Vector3 {
-    const limit = this.config.boundaryLimit - 0.15; // bikeHalfWidth
+    const limit = this.config.boundaryLimit - 0.08; // Reduced from 0.15 for smaller hitbox
     return new THREE.Vector3(
       Math.max(-limit, Math.min(limit, pos.x)),
       pos.y,
@@ -16,8 +16,8 @@ export class BikePhysics {
   }
 
   public checkCollisions(position: THREE.Vector3, trail: THREE.Vector3[], bikeState: BikeState): CollisionResult {
-    const bikeHalfWidth = 0.15;
-    const safetyMargin = 0.02;
+    const bikeHalfWidth = 0.08; // Reduced from 0.15 for smaller hitbox
+    const safetyMargin = 0.01; // Reduced from 0.02 for closer contact
 
     let hit = false;
     let normal: THREE.Vector3 | null = null;
@@ -25,7 +25,7 @@ export class BikePhysics {
     let correctedZ = position.z;
     let wallKey = '';
 
-    // Check boundary collisions
+    // Check boundary collisions with reduced margins
     const limit = this.config.boundaryLimit - bikeHalfWidth;
     
     if (Math.abs(position.x) > limit) {
@@ -33,6 +33,12 @@ export class BikePhysics {
       correctedX = Math.sign(position.x) * limit;
       normal = new THREE.Vector3(-Math.sign(position.x), 0, 0);
       wallKey = `x${Math.sign(position.x)}`;
+      
+      // Minimal push-back for close contact
+      const penetration = Math.abs(position.x) - limit;
+      if (penetration > 0) {
+        correctedX = Math.sign(position.x) * (limit - Math.max(penetration, 0.02)); // Reduced push-back
+      }
     }
     
     if (Math.abs(position.z) > limit) {
@@ -40,11 +46,16 @@ export class BikePhysics {
       correctedZ = Math.sign(position.z) * limit;
       normal = new THREE.Vector3(0, 0, -Math.sign(position.z));
       wallKey = `z${Math.sign(position.z)}`;
+      
+      // Minimal push-back for close contact
+      const penetration = Math.abs(position.z) - limit;
+      if (penetration > 0) {
+        correctedZ = Math.sign(position.z) * (limit - Math.max(penetration, 0.02)); // Reduced push-back
+      }
     }
 
-    // Check trail collisions - only check segments that should be visible/active
-    // Skip recent segments to prevent self-collision, and only check segments that are actually rendered
-    const segmentsToSkip = 10; // Skip last 10 segments to prevent self-collision
+    // Check trail collisions with reduced skip segments for better collision coverage
+    const segmentsToSkip = 2; // Reduced from 3
     const maxSegmentsToCheck = Math.max(0, trail.length - segmentsToSkip - 1);
     
     if (maxSegmentsToCheck > 0) {
@@ -69,23 +80,28 @@ export class BikePhysics {
         const dist = position.distanceTo(closestPoint);
         const collisionDist = bikeHalfWidth + this.config.trailWidth/2 + safetyMargin;
         
-        // Grinding depth check
+        const isInsideTrail = dist < collisionDist;
+        
+        // Simplified grinding check
         let allowPass = false;
         if (wallKey) {
           const grindDepth = this.grindDepthMap[wallKey] || 0;
-          if (bikeState.grindOffset > grindDepth + 0.01) {
+          if (bikeState.grindOffset > grindDepth + 0.03) { // Reduced threshold
             allowPass = true;
           }
         }
         
-        if (dist < collisionDist && !allowPass) {
+        if (isInsideTrail && !allowPass) {
           hit = true;
           
           const pushDir = new THREE.Vector3().subVectors(position, closestPoint);
           if (pushDir.length() > 0.001) {
             pushDir.normalize();
             
-            const safePoint = closestPoint.clone().add(pushDir.multiplyScalar(collisionDist + 0.01));
+            // Minimal push-back for close contact
+            const penetrationDepth = collisionDist - dist;
+            const pushDistance = collisionDist + Math.max(penetrationDepth, 0.02) + 0.01; // Reduced push distance
+            const safePoint = closestPoint.clone().add(pushDir.multiplyScalar(pushDistance));
             
             const currentDist = new THREE.Vector2(correctedX, correctedZ).distanceTo(new THREE.Vector2(position.x, position.z));
             const newDist = new THREE.Vector2(safePoint.x, safePoint.z).distanceTo(new THREE.Vector2(position.x, position.z));

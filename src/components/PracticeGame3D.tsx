@@ -21,25 +21,14 @@ class ColoredBikeRenderer extends BikeRenderer {
           child.material = child.material.clone();
           child.material.color = new THREE.Color(color);
           child.material.emissive = new THREE.Color(color);
-          child.material.emissiveIntensity = 0.3;
+          child.material.emissiveIntensity = 0.6; // Brighter emissive for bot-like appearance
         }
       }
     });
   }
 }
 
-// Extended trail renderer with color support
-class ColoredTrailRenderer extends TrailRenderer {
-  constructor(scene: THREE.Scene, config: GameConfig, color: number = 0x00ffff) {
-    super(scene, config);
-    // Get the instanced mesh and override its material color
-    const instancedMesh = (this as any).instancedMesh;
-    if (instancedMesh && instancedMesh.material) {
-      instancedMesh.material = instancedMesh.material.clone();
-      instancedMesh.material.color = new THREE.Color(color);
-    }
-  }
-}
+// Color support is now built into TrailRenderer, no need for separate class
 
 interface PracticeGame3DProps {
   onSettings?: () => void;
@@ -137,12 +126,12 @@ const PracticeGame3D: React.FC<PracticeGame3DProps> = ({
 
      // Create renderers for each bike
      const playerBikeRenderer = new BikeRenderer(scene); // Default player bike (no color change)
-     const aiBikeRenderer = new ColoredBikeRenderer(scene, 0xff0000); // Red for AI
+     const aiBikeRenderer = new ColoredBikeRenderer(scene, 0xff3030); // Bright red for AI
      bikeRenderersRef.current.set('player', playerBikeRenderer);
      bikeRenderersRef.current.set('ai', aiBikeRenderer);
 
-     const playerTrailRenderer = new TrailRenderer(scene, DEFAULT_CONFIG); // Default trail color
-     const aiTrailRenderer = new ColoredTrailRenderer(scene, DEFAULT_CONFIG, 0xff0000); // Red trails
+     const playerTrailRenderer = new TrailRenderer(scene, DEFAULT_CONFIG, 0x00ffff); // Blue trail
+     const aiTrailRenderer = new TrailRenderer(scene, DEFAULT_CONFIG, 0xff3030); // Bright red trails
      trailRenderersRef.current.set('player', playerTrailRenderer);
      trailRenderersRef.current.set('ai', aiTrailRenderer);
 
