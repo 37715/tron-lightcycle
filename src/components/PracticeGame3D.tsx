@@ -244,7 +244,7 @@ const PracticeGame3D: React.FC<PracticeGame3DProps> = ({
       brake: ['space']
     };
     try {
-      const saved = localStorage.getItem('hypoxia-keybinds');
+      const saved = localStorage.getItem('cathexis-keybinds');
       if (saved) {
         const parsed = JSON.parse(saved);
         keyBinds = {
@@ -280,7 +280,7 @@ const PracticeGame3D: React.FC<PracticeGame3DProps> = ({
       brake: ['space']
     };
     try {
-      const saved = localStorage.getItem('hypoxia-keybinds');
+      const saved = localStorage.getItem('cathexis-keybinds');
       if (saved) {
         const parsed = JSON.parse(saved);
         keyBinds = {
@@ -375,12 +375,7 @@ const PracticeGame3D: React.FC<PracticeGame3DProps> = ({
       
       {/* UI Overlay */}
       <div className="absolute top-4 left-4 text-white z-10">
-        <h1 className="text-2xl font-bold text-blue-400 mb-2 ui-text">hypoxia - Practice Mode</h1>
-        <div className="text-sm text-gray-300 ui-text">
-          <p>Z/← Turn Left | X/→ Turn Right | Space Brake</p>
-          <p>Defeat the AI bot to win!</p>
-          <p className="text-xs opacity-50 mt-1">Press ESC to open menu</p>
-        </div>
+        <h1 className="text-2xl text-blue-400 mb-2 main-title">cathexis</h1>
       </div>
 
       {/* Health Bars */}
@@ -388,7 +383,6 @@ const PracticeGame3D: React.FC<PracticeGame3DProps> = ({
         <>
           {/* Player Health Bar */}
           <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 z-10">
-            <div className="text-center text-white text-sm mb-1">PLAYER</div>
             <div className="brake-meter-container">
               <div
                 className={`brake-meter-fill brake-meter-width ${
@@ -411,24 +405,6 @@ const PracticeGame3D: React.FC<PracticeGame3DProps> = ({
               />
             </div>
             <div className="health-bar-text text-center">HEALTH</div>
-          </div>
-
-          {/* AI Health Bar */}
-          <div className="absolute top-20 right-4 z-10">
-            <div className="text-center text-red-400 text-sm mb-1">AI BOT</div>
-            <div className="w-48">
-              <div className="health-bar-container" style={{ width: '100%' }}>
-                <div
-                  className="health-bar-fill"
-                  style={{ 
-                    width: `${Math.max(aiHealth, 0)}%`,
-                    backgroundColor: aiHealth > 60 ? '#ff4444' : 
-                                    aiHealth > 30 ? '#ff6666' : 
-                                    aiHealth > 15 ? '#ff8888' : '#ffaaaa'
-                  }}
-                />
-              </div>
-            </div>
           </div>
         </>
       )}

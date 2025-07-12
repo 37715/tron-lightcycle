@@ -16,12 +16,12 @@ const Tutorial: React.FC<TutorialProps> = ({ onBack }) => {
       
       <div className="tutorial-content">
         <div className="tutorial-header">
-          <h1 className="tutorial-title ui-text">TUTORIAL</h1>
+          <h1 className="tutorial-title">TUTORIAL</h1>
         </div>
         
         <div className="tutorial-sections">
           <div className="tutorial-section">
-            <h2 className="section-title ui-text">CONTROLS</h2>
+            <h2 className="section-title">CONTROLS</h2>
             <div className="control-grid">
               <div className="control-item">
                 <div className="key-display ui-text">Z</div>

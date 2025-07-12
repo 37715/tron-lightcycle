@@ -30,8 +30,8 @@ const MainMenu: React.FC<MainMenuProps> = ({ onStartPractice, onTutorial, onSett
       {/* Main Content */}
       <div className="menu-content">
         <div className="logo-section">
-          <h1 className="main-logo ui-text">hypoxia</h1>
-          <p className="main-subtitle ui-text">3D GRID RACING</p>
+          <h1 className="main-logo">cathexis</h1>
+          <p className="main-subtitle">3D GRID RACING</p>
         </div>
 
         {/* Main Menu Buttons */}
@@ -85,7 +85,7 @@ const MainMenu: React.FC<MainMenuProps> = ({ onStartPractice, onTutorial, onSett
         {/* Submenu for Casual and Competitive */}
         {(view === 'casual' || view === 'competitive') && (
           <div className={`submenu-content ${view}`}>
-            <h2 className="submenu-title ui-text">
+            <h2 className="submenu-title">
               {view === 'competitive' ? 'competitive • ranked' : 'casual play'}
             </h2>
             <div className="submenu-grid">

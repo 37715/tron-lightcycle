@@ -10,7 +10,7 @@ export const DEFAULT_CONFIG: GameConfig = {
   // Trail constants - optimized for precision and moderate length
   trailWidth: 0.03,   // Even thinner for maximum precision in tight mazes
   trailHeight: 0.45,   // Slightly taller for better visibility
-  trailMaxFrames: 120 * 60, // 2 minutes - half again for better performance
+  trailMaxFrames: 48 * 60, // 48 seconds - doubled length for better gameplay
   
   // Ring/zone constants
   ringInitialRadius: 25,

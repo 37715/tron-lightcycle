@@ -23,7 +23,7 @@ function App() {
 
   useEffect(() => {
     try {
-      const savedVisuals = localStorage.getItem('hypoxia-visual-settings');
+      const savedVisuals = localStorage.getItem('cathexis-visual-settings');
       if (savedVisuals) {
         const parsed = JSON.parse(savedVisuals);
         setVisualSettings({

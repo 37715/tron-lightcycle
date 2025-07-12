@@ -176,7 +176,7 @@ const Game3D: React.FC<Game3DProps> = ({
       brake: ['space']
     };
     try {
-      const saved = localStorage.getItem('hypoxia-keybinds');
+      const saved = localStorage.getItem('cathexis-keybinds');
       if (saved) {
         const parsed = JSON.parse(saved);
         keyBinds = {
@@ -212,7 +212,7 @@ const Game3D: React.FC<Game3DProps> = ({
       brake: ['space']
     };
     try {
-      const saved = localStorage.getItem('hypoxia-keybinds');
+      const saved = localStorage.getItem('cathexis-keybinds');
       if (saved) {
         const parsed = JSON.parse(saved);
         keyBinds = {
@@ -309,8 +309,8 @@ const Game3D: React.FC<Game3DProps> = ({
       
       {/* UI Overlay */}
       <div className="absolute top-4 left-4 text-white z-10">
-        <h1 className="text-2xl font-bold text-blue-400 mb-2 ui-text">hypoxia</h1>
-        <div className="text-sm text-gray-300 ui-text">
+        <h1 className="text-2xl text-blue-400 mb-2 main-title">cathexis</h1>
+        <div className="text-sm text-gray-300 ui-text-descriptive">
           <p>Z/← Turn Left | X/→ Turn Right | Space Brake</p>
           <p>Avoid walls and your own trail!</p>
           <p className="text-xs opacity-50 mt-1">Press ESC to open menu</p>
@@ -318,7 +318,7 @@ const Game3D: React.FC<Game3DProps> = ({
             <p className="text-yellow-400 font-bold">🛑 BRAKING ACTIVE</p>
           )}
           {gameState === 'playing' && gameEngineRef.current && trailRendererRef.current && (
-            <div className="mt-2 text-xs opacity-60">
+            <div className="mt-2 text-xs opacity-60 ui-text-tech">
               <p>Trail Points: {gameEngineRef.current.getTrailLength()}</p>
               <p>Rendered Segments: {trailRendererRef.current.getTrailMeshCount()}</p>
               <p>Trail Age: {Math.floor(gameEngineRef.current.getActiveTrailFrameSpan() / 60)}s</p>

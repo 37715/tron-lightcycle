@@ -41,7 +41,7 @@ const Settings: React.FC<SettingsProps> = ({ onBack, onLeaveGame, onRestartGame,
 
   // Load saved keybinds from localStorage
   useEffect(() => {
-    const saved = localStorage.getItem('hypoxia-keybinds');
+    const saved = localStorage.getItem('cathexis-keybinds');
     if (saved) {
       try {
         const parsedBinds = JSON.parse(saved);
@@ -61,7 +61,7 @@ const Settings: React.FC<SettingsProps> = ({ onBack, onLeaveGame, onRestartGame,
   // Save keybinds to localStorage
   const saveKeyBinds = (newBinds: KeyBinds) => {
     setKeyBinds(newBinds);
-    localStorage.setItem('hypoxia-keybinds', JSON.stringify(newBinds));
+    localStorage.setItem('cathexis-keybinds', JSON.stringify(newBinds));
   };
 
   // Handle key press for binding
@@ -104,7 +104,7 @@ const Settings: React.FC<SettingsProps> = ({ onBack, onLeaveGame, onRestartGame,
 
   // Load saved visual settings from localStorage
   useEffect(() => {
-    const savedVisuals = localStorage.getItem('hypoxia-visual-settings');
+    const savedVisuals = localStorage.getItem('cathexis-visual-settings');
     if (savedVisuals) {
       try {
         const parsedVisuals = JSON.parse(savedVisuals);
@@ -125,7 +125,7 @@ const Settings: React.FC<SettingsProps> = ({ onBack, onLeaveGame, onRestartGame,
   const updateVisualSettings = (newSettings: Partial<VisualSettings>) => {
     const updatedSettings = { ...visualSettings, ...newSettings };
     setVisualSettings(updatedSettings);
-    localStorage.setItem('hypoxia-visual-settings', JSON.stringify(updatedSettings));
+    localStorage.setItem('cathexis-visual-settings', JSON.stringify(updatedSettings));
     onVisualSettingsChange?.(updatedSettings);
   };
 
