@@ -16,6 +16,10 @@ export class BikePhysics {
   }
 
   public checkCollisions(position: THREE.Vector3, trail: THREE.Vector3[], bikeState: BikeState): CollisionResult {
+    return this.checkCollisionsWithSkip(position, trail, bikeState, 2);
+  }
+
+  public checkCollisionsWithSkip(position: THREE.Vector3, trail: THREE.Vector3[], bikeState: BikeState, segmentsToSkip: number = 2): CollisionResult {
     const bikeHalfWidth = 0.08; // Reduced from 0.15 for smaller hitbox
     const safetyMargin = 0.01; // Reduced from 0.02 for closer contact
 
@@ -54,8 +58,8 @@ export class BikePhysics {
       }
     }
 
-    // Check trail collisions with reduced skip segments for better collision coverage
-    const segmentsToSkip = 2; // Reduced from 3
+    // Check trail collisions and ignore only the brand-new segment that represents
+    // the bike's current forward move. Anything older than that must be solid.
     const maxSegmentsToCheck = Math.max(0, trail.length - segmentsToSkip - 1);
     
     if (maxSegmentsToCheck > 0) {

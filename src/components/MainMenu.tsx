@@ -56,9 +56,11 @@ const MainMenu: React.FC<MainMenuProps> = ({ onStartPractice, onTutorial, onSett
             >
               <span className="button-content">
                 <span className="button-icon">▶</span>
-                <span className="button-text">PRACTICE</span>
+                <span className="button-text">PRACTICE vs AI</span>
               </span>
             </button>
+            
+            {/* Single Player button removed */}
             
             <button 
               className="menu-button menu-button-help ui-text"

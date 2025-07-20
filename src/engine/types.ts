@@ -13,6 +13,7 @@ export interface BikeState {
   grindOffset: number; // Keep for compatibility, but rubber is the main system now
   grindNormal: THREE.Vector3 | null;
   graceFramesRemaining: number;
+  isGrinding: boolean;
   brakeEnergy: number;
   brakeRechargeDelay: number;
   isBraking: boolean;
@@ -120,3 +121,26 @@ export interface CollisionResult {
 export type GameState = 'waiting' | 'playing' | 'gameOver';
 export type DamageType = 'collision' | 'zone' | null;
 export type TurnDirection = 'left' | 'right';
+
+export interface CollisionCheck {
+  frameNumber: number;
+  position: THREE.Vector3;
+  collision: boolean;
+  rubber: number;
+  grindOffset: number;
+  distanceToWall: number;
+  collisionType: string;
+  timestamp: number;
+}
+
+export interface DebugState {
+  enabled: boolean;
+  showCollisionBox: boolean;
+  showWallSegments: boolean;
+  showTextOverlay: boolean;
+  showGrindZone: boolean;
+  logCollisionChanges: boolean;
+  stepByStep: boolean;
+  isPaused: boolean;
+  collisionHistory: CollisionCheck[];
+}

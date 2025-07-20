@@ -7,6 +7,7 @@ import { BikeRenderer } from '../renderer/BikeRenderer';
 import { TrailRenderer } from '../renderer/TrailRenderer';
 import { ArenaRenderer } from '../renderer/ArenaRenderer';
 import { CameraController } from '../renderer/CameraController';
+import { DebugRenderer } from '../renderer/DebugRenderer';
 
 // Extended bike renderer with color support
 class ColoredBikeRenderer extends BikeRenderer {
@@ -63,6 +64,7 @@ const PracticeGame3D: React.FC<PracticeGame3DProps> = ({
   const trailRenderersRef = useRef<Map<string, TrailRenderer>>(new Map());
   const arenaRendererRef = useRef<ArenaRenderer>();
   const cameraControllerRef = useRef<CameraController>();
+  const debugRendererRef = useRef<DebugRenderer>();
   
   const [gameState, setGameState] = useState<GameState>('playing');
   const [playerHealth, setPlayerHealth] = useState(100);
@@ -137,6 +139,7 @@ const PracticeGame3D: React.FC<PracticeGame3DProps> = ({
 
      arenaRendererRef.current = new ArenaRenderer(scene, DEFAULT_CONFIG);
      cameraControllerRef.current = new CameraController(camera);
+     debugRendererRef.current = new DebugRenderer(scene);
 
      cameraControllerRef.current.setTurnSpeed(visualSettings.cameraTurnSpeed);
      arenaRendererRef.current.setGridVisible(visualSettings.showGrid);
@@ -215,6 +218,34 @@ const PracticeGame3D: React.FC<PracticeGame3DProps> = ({
         gameEngineRef.current.getFrameCount(),
         isOutsideRing
       );
+      
+      // Update debug rendering
+      if (debugRendererRef.current) {
+        const debugState = gameEngineRef.current.getDebugState();
+        debugRendererRef.current.setVisible(debugState.enabled);
+        
+        if (debugState.enabled) {
+          // Update collision boxes for all bikes
+          for (const [bikeId] of bikeRenderersRef.current) {
+            const collisionBox = gameEngineRef.current.getDebugCollisionBox(bikeId);
+            if (collisionBox.length > 0) {
+              const color = bikeId === 'player' ? '#00ff00' : '#ff8000';
+              debugRendererRef.current.updateCollisionBox(bikeId, collisionBox, color);
+            }
+            
+            const grindZone = gameEngineRef.current.getDebugGrindZone(bikeId);
+            debugRendererRef.current.updateGrindZone(bikeId, grindZone);
+          }
+          
+          // Update wall segments
+          const wallSegments = gameEngineRef.current.getNearbyWallSegments();
+          debugRendererRef.current.updateWallSegments(wallSegments);
+          
+          // Update text overlay
+          const debugText = gameEngineRef.current.getDebugTextInfo();
+          debugRendererRef.current.updateTextOverlay(debugText);
+        }
+      }
     }
 
     rendererRef.current.render(sceneRef.current, cameraRef.current);
@@ -243,6 +274,30 @@ const PracticeGame3D: React.FC<PracticeGame3DProps> = ({
         };
       }
     } catch {/* ignore */}
+
+    // Debug shortcuts
+    if (key === 'd' && event.shiftKey) {
+      // Shift+D: Toggle debug mode
+      const currentDebugState = gameEngineRef.current.getDebugState();
+      gameEngineRef.current.setDebugEnabled(!currentDebugState.enabled);
+      event.preventDefault();
+      return;
+    } else if (key === 'd' && !event.shiftKey && gameEngineRef.current.getDebugState().enabled) {
+      // D: Dump debug info
+      gameEngineRef.current.dumpDebugInfo();
+      event.preventDefault();
+      return;
+    } else if (key === 'g' && gameEngineRef.current.getDebugState().enabled) {
+      // G: Toggle step-by-step mode and step frame
+      if (gameEngineRef.current.getDebugState().stepByStep) {
+        gameEngineRef.current.stepFrame();
+      } else {
+        gameEngineRef.current.toggleDebugFeature('stepByStep');
+        gameEngineRef.current.pauseGame();
+      }
+      event.preventDefault();
+      return;
+    }
 
     if (key === 'escape' && onSettings) {
       onSettings();
@@ -319,6 +374,7 @@ const PracticeGame3D: React.FC<PracticeGame3DProps> = ({
         currentMount.removeChild(rendererRef.current.domElement);
       }
       trailRenderersRef.current.forEach(renderer => renderer.dispose());
+      debugRendererRef.current?.cleanup();
       rendererRef.current?.dispose();
     };
   }, []); // <-- empty dependencies so initScene runs ONCE

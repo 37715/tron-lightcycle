@@ -7,6 +7,7 @@ import { BikeRenderer } from '../renderer/BikeRenderer';
 import { TrailRenderer } from '../renderer/TrailRenderer';
 import { ArenaRenderer } from '../renderer/ArenaRenderer';
 import { CameraController } from '../renderer/CameraController';
+import { DebugRenderer } from '../renderer/DebugRenderer';
 
 interface Game3DProps {
   onSettings?: () => void;
@@ -41,6 +42,7 @@ const Game3D: React.FC<Game3DProps> = ({
   const trailRendererRef = useRef<TrailRenderer>();
   const arenaRendererRef = useRef<ArenaRenderer>();
   const cameraControllerRef = useRef<CameraController>();
+  const debugRendererRef = useRef<DebugRenderer>();
   
   const [gameState, setGameState] = useState<GameState>('playing'); // Start directly in playing state
   const [bikeHealth, setBikeHealth] = useState(100);
@@ -105,6 +107,7 @@ const Game3D: React.FC<Game3DProps> = ({
     trailRendererRef.current = new TrailRenderer(scene, DEFAULT_CONFIG);
     arenaRendererRef.current = new ArenaRenderer(scene, DEFAULT_CONFIG);
     cameraControllerRef.current = new CameraController(camera);
+    debugRendererRef.current = new DebugRenderer(scene);
 
     cameraControllerRef.current.setTurnSpeed(visualSettings.cameraTurnSpeed);
     arenaRendererRef.current.setGridVisible(visualSettings.showGrid);
@@ -154,11 +157,11 @@ const Game3D: React.FC<Game3DProps> = ({
       // 1. Remove old segments first
       const pendingRemovals = gameEngineRef.current.getSegmentsToRemove();
       if (pendingRemovals > 0) {
-        const availableSegments = trailRendererRef.current.getTrailMeshCount();
+        const availableSegments = trailRendererRef.current?.getTrailMeshCount() || 0;
         const removals = Math.min(pendingRemovals, availableSegments);
         
         for (let i = 0; i < removals; i++) {
-          trailRendererRef.current.removeOldestTrailSegment();
+          trailRendererRef.current?.removeOldestTrailSegment();
         }
       }
 
@@ -169,44 +172,7 @@ const Game3D: React.FC<Game3DProps> = ({
       });
 
       // 3. Update trail geometry last
-      trailRendererRef.current.updateTrailGeometry();
-
-      // Debug: Check for objects near center more frequently to catch floating geometry
-      if (gameEngineRef.current.getFrameCount() % 120 === 0) { // Every 2 seconds instead of 5
-        const centerObjects: any[] = [];
-        sceneRef.current.traverse((object) => {
-          if (object.position.distanceTo(new THREE.Vector3(0, 0, 0)) < 3) { // Closer to center
-            centerObjects.push({
-              name: object.name || 'unnamed',
-              type: object.type,
-              position: object.position.toArray(),
-              visible: object.visible,
-              scale: object.scale.toArray(),
-              material: (object as any).material ? {
-                color: (object as any).material.color?.getHex(),
-                opacity: (object as any).material.opacity
-              } : null
-            });
-          }
-        });
-        if (centerObjects.length > 0) {
-          console.log('Objects near center:', centerObjects);
-          
-          // Try to identify and remove any suspicious objects
-          sceneRef.current.traverse((object) => {
-            if (object.position.distanceTo(new THREE.Vector3(0, 0, 0)) < 2 && 
-                object.visible && 
-                !object.name.includes('ringSegment') &&
-                !object.name.includes('camera') &&
-                !object.name.includes('light') &&
-                object.type === 'Mesh') {
-              console.warn('Removing suspicious center object:', object.name, object.type);
-              object.visible = false;
-              object.scale.setScalar(0);
-            }
-          });
-        }
-      }
+      trailRendererRef.current?.updateTrailGeometry();
 
       const isOutsideRing = arena.isPositionOutsideRing(bikeState.position);
       arenaRendererRef.current.updateRings(
@@ -214,6 +180,32 @@ const Game3D: React.FC<Game3DProps> = ({
         gameEngineRef.current.getFrameCount(),
         isOutsideRing
       );
+      
+      // Update debug rendering
+      if (debugRendererRef.current) {
+        const debugState = gameEngineRef.current.getDebugState();
+        debugRendererRef.current.setVisible(debugState.enabled);
+        
+        if (debugState.enabled) {
+          // Update collision box for the bike
+          const collisionBox = gameEngineRef.current.getDebugCollisionBox();
+          if (collisionBox.length > 0) {
+            debugRendererRef.current.updateCollisionBox('player', collisionBox, '#00ff00');
+          }
+          
+          // Update grind zone
+          const grindZone = gameEngineRef.current.getDebugGrindZone();
+          debugRendererRef.current.updateGrindZone('player', grindZone);
+          
+          // Update wall segments
+          const wallSegments = gameEngineRef.current.getNearbyWallSegments();
+          debugRendererRef.current.updateWallSegments(wallSegments);
+          
+          // Update text overlay
+          const debugText = gameEngineRef.current.getDebugTextInfo();
+          debugRendererRef.current.updateTextOverlay(debugText);
+        }
+      }
     }
 
     rendererRef.current.render(sceneRef.current, cameraRef.current);
@@ -242,6 +234,30 @@ const Game3D: React.FC<Game3DProps> = ({
         };
       }
     } catch {/* ignore */}
+
+    // Debug shortcuts
+    if (key === 'd' && event.shiftKey) {
+      // Shift+D: Toggle debug mode
+      const currentDebugState = gameEngineRef.current.getDebugState();
+      gameEngineRef.current.setDebugEnabled(!currentDebugState.enabled);
+      event.preventDefault();
+      return;
+    } else if (key === 'd' && !event.shiftKey && gameEngineRef.current.getDebugState().enabled) {
+      // D: Dump debug info
+      gameEngineRef.current.dumpDebugInfo();
+      event.preventDefault();
+      return;
+    } else if (key === 'g' && gameEngineRef.current.getDebugState().enabled) {
+      // G: Toggle step-by-step mode and step frame
+      if (gameEngineRef.current.getDebugState().stepByStep) {
+        gameEngineRef.current.stepFrame();
+      } else {
+        gameEngineRef.current.toggleDebugFeature('stepByStep');
+        gameEngineRef.current.pauseGame();
+      }
+      event.preventDefault();
+      return;
+    }
 
     if (key === 'escape' && onSettings) {
       onSettings();
@@ -318,6 +334,7 @@ const Game3D: React.FC<Game3DProps> = ({
         currentMount.removeChild(rendererRef.current.domElement);
       }
       trailRendererRef.current?.dispose();
+      debugRendererRef.current?.cleanup();
       rendererRef.current?.dispose();
     };
   }, []); // <-- empty dependencies so initScene runs ONCE
@@ -371,12 +388,12 @@ const Game3D: React.FC<Game3DProps> = ({
           <p>Avoid walls and your own trail!</p>
           <p className="text-xs opacity-50 mt-1">Press ESC to open menu</p>
           {gameEngineRef.current?.getBikeState().isBraking && (
-            <p className="text-yellow-400 font-bold">🛑 BRAKING ACTIVE</p>
+            <p className="text-yellow-400 font-bold">�� BRAKING ACTIVE</p>
           )}
           {gameState === 'playing' && gameEngineRef.current && trailRendererRef.current && (
             <div className="mt-2 text-xs opacity-60 ui-text-tech">
               <p>Trail Points: {gameEngineRef.current.getTrailLength()}</p>
-              <p>Rendered Segments: {trailRendererRef.current.getTrailMeshCount()}</p>
+              <p>Rendered Segments: {trailRendererRef.current?.getTrailMeshCount() || 0}</p>
               <p>Trail Age: {Math.floor(gameEngineRef.current.getActiveTrailFrameSpan() / 60)}s</p>
               {gameEngineRef.current.getBikeState().graceFramesRemaining > 0 && (
                 <p className="text-yellow-400 font-bold">
