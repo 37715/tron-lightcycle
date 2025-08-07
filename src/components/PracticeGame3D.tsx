@@ -152,21 +152,33 @@ const PracticeGame3D: React.FC<PracticeGame3DProps> = ({
     // Only update game when playing and not paused
     if (gameStateRef.current === 'playing' && !isPausedRef.current && countdownRef.current === null) {
       const healthUpdates = gameEngineRef.current.update();
+      // Debug: log zone state for player on spawn to diagnose no-damage issue
+      const arena = gameEngineRef.current.getArena();
+      const playerStateDbg = gameEngineRef.current.getBikeState('player');
+      if (playerStateDbg) {
+        const dist = Math.hypot(playerStateDbg.position.x, playerStateDbg.position.z).toFixed(2);
+        const ring = arena.getCurrentRingRadius().toFixed(2);
+        const outside = arena.isPositionOutsideRing(playerStateDbg.position);
+        if (gameEngineRef.current.getFrameCount() % 60 === 0) {
+          console.log(`MP 🔵 ZONE CHECK: dist=${dist}, ring=${ring}, outside=${outside}`);
+        }
+      }
       
       const playerBike = gameEngineRef.current.getBikeState('player');
       const aiBike = gameEngineRef.current.getBikeState('ai');
       
       // Update health displays
       healthUpdates.forEach((update, bikeId) => {
-        const actualHealth = Math.max(0, Math.min(156, update.newHealth));
-        const healthPercentage = (actualHealth / 156) * 100;
+        const maxH = gameEngineRef.current!.getBikeState(bikeId)?.maxHealth ?? DEFAULT_CONFIG.maxHealth ?? 100;
+        const actualHealth = Math.max(0, Math.min(maxH, update.newHealth));
+        const healthPercentage = (actualHealth / maxH) * 100;
         
         if (bikeId === 'player') {
-          setPlayerHealth(prev => (Math.abs(prev - healthPercentage) > 0.1 ? healthPercentage : prev));
+          setPlayerHealth(prev => (Math.abs(prev - healthPercentage) > 0.01 ? healthPercentage : prev));
           const playerState = gameEngineRef.current!.getBikeState('player');
           setBrakeEnergy(playerState?.brakeEnergy || 0);
         } else if (bikeId === 'ai') {
-          setAIHealth(prev => (Math.abs(prev - healthPercentage) > 0.1 ? healthPercentage : prev));
+          setAIHealth(prev => (Math.abs(prev - healthPercentage) > 0.01 ? healthPercentage : prev));
         }
       });
 
@@ -209,7 +221,6 @@ const PracticeGame3D: React.FC<PracticeGame3DProps> = ({
       });
 
       // Update arena
-      const arena = gameEngineRef.current.getArena();
       const playerState = gameEngineRef.current.getBikeState('player');
       const isOutsideRing = playerState ? arena.isPositionOutsideRing(playerState.position) : false;
       

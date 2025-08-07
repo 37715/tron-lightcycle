@@ -16,6 +16,7 @@ export interface BikeData {
   segmentsToRemove: number;
   isAI: boolean;
   color: string;
+  positionHistory: THREE.Vector3[];
 
   // Respawn system
   spawnPosition: THREE.Vector3;
@@ -64,6 +65,7 @@ export class MultiplayerGameEngine {
       segmentsToRemove: 0,
       isAI: false,
       color: '#00ffff', // Cyan for player
+      positionHistory: [],
       spawnPosition: new THREE.Vector3(0, 0, 10),
       initialRotation: 0
     };
@@ -83,6 +85,7 @@ export class MultiplayerGameEngine {
       segmentsToRemove: 0,
       isAI: true,
       color: '#ff0000', // Red for AI
+      positionHistory: [],
       spawnPosition: new THREE.Vector3(0, 0, -10),
       initialRotation: Math.PI
     };
@@ -99,8 +102,8 @@ export class MultiplayerGameEngine {
       speed: this.config.bikeSpeed,
       speedTarget: this.config.speedTarget,
       lastTurnFrame: 0,
-      health: 156,
-      maxHealth: 156,
+      health: this.config.maxHealth ?? 156,
+      maxHealth: this.config.maxHealth ?? 156,
       grindOffset: 0,
       grindNormal: null,
       graceFramesRemaining: 0,
@@ -261,39 +264,164 @@ export class MultiplayerGameEngine {
         );
         
         let turnSafe = true;
+        let positionWasReset = false;
         
-        // NEW ANTI-PHASING: Reset position before turning if grinding
+        // INVISIBLE ANTI-PHASING: Reset position before turning if grinding BUT make it visually smooth
         if ((bike.state.grindOffset > 0 || bike.state.collision) && bike.state.grindNormal) {
-          console.log(`🔧 POSITION RESET [${bikeId}]: Grinding detected, resetting bike position before turn`);
+          console.log(`🔧 INVISIBLE ANTI-PHASING [${bikeId}]: Grinding detected, performing invisible position reset`);
           
-          // Calculate safe distance from wall
-          const safeDistance = this.config.trailWidth + 0.1;
+          // Store the original position for smooth trail creation
+          const originalPosition = bike.state.position.clone();
+          
+          // Use smaller safe distance for tighter gameplay but still effective anti-phasing
+          const safeDistance = this.config.trailWidth + 0.02;
           const normalizedGrindNormal = bike.state.grindNormal.clone().normalize();
           
-          // Push bike away from wall by safe distance
-          const safePosition = bike.state.position.clone().add(
+          // Push bike away from wall by safe distance BEFORE processing the turn
+          const safePosition = originalPosition.clone().add(
             normalizedGrindNormal.multiplyScalar(safeDistance)
           );
           
           // Clamp to boundaries and update position
           bike.state.position = bike.physics.clampToBoundary(safePosition);
           
-          console.log(`📍 Position reset [${bikeId}] to: (${bike.state.position.x.toFixed(3)}, ${bike.state.position.z.toFixed(3)})`);
-        }
-        
-        if (turnSafe) {
-          // Turn is safe - execute it
+          // INVISIBLE TRAIL SMOOTHING: Create smooth trail segment from original to reset position
           if (bike.state.trail.length > 0) {
-            const lastPoint = bike.state.trail[bike.state.trail.length - 1];
-            bike.newTrailSegments.push({ start: lastPoint.clone(), end: bike.state.position.clone() });
+            const lastTrailPoint = bike.state.trail[bike.state.trail.length - 1];
+            const resetPosition = bike.state.position.clone();
+            
+            // Only create smooth segment if there's meaningful distance
+            if (lastTrailPoint.distanceTo(resetPosition) > 0.01) {
+              // Add intermediate points for ultra-smooth visual transition
+              const steps = Math.max(2, Math.ceil(lastTrailPoint.distanceTo(resetPosition) / 0.02));
+              for (let i = 1; i <= steps; i++) {
+                const t = i / steps;
+                const intermediatePoint = lastTrailPoint.clone().lerp(resetPosition, t);
+                
+                bike.newTrailSegments.push({ 
+                  start: i === 1 ? lastTrailPoint.clone() : bike.state.trail[bike.state.trail.length - 1].clone(), 
+                  end: intermediatePoint.clone() 
+                });
+                
+                if (i === steps) {
+                  // Final point is the reset position
+                  bike.state.trail.push(resetPosition.clone());
+                  bike.trailFrames.push(this.frameCount);
+                } else {
+                  // Add intermediate trail points for smoothness
+                  bike.state.trail.push(intermediatePoint.clone());
+                  bike.trailFrames.push(this.frameCount);
+                }
+              }
+              positionWasReset = true;
+            }
           }
           
-          bike.state.trail.push(bike.state.position.clone());
-          bike.trailFrames.push(this.frameCount);
+          // Reset grindOffset after position reset to ensure clean state
+          bike.state.grindOffset = 0;
           
-          bike.turnQueue.shift(); // Now remove the turn from queue
+          console.log(`📍 Invisible position reset [${bikeId}]: (${originalPosition.x.toFixed(3)}, ${originalPosition.z.toFixed(3)}) → (${bike.state.position.x.toFixed(3)}, ${bike.state.position.z.toFixed(3)})`);
+        }
+        
+        // COMPREHENSIVE TURN SAFETY CHECKS (adapted for multiplayer)
+        const cornerPoint = bike.state.position.clone();
+        const postTurnPos = cornerPoint.clone().add(
+          newDirection.multiplyScalar(this.config.bikeSpeed)
+        );
+        
+        // Check corner position using available collision method
+        if (turnSafe && this.wouldCollideAtPosition(cornerPoint, bikeId)) {
+          turnSafe = false;
+          console.log(`🚨 TURN BLOCKED [${bikeId}]: Corner position collision detected`);
+        }
+        
+        // Check multiple points ahead in the new direction
+        if (turnSafe) {
+          for (let i = 1; i <= 5; i++) { // Increased for stronger validation
+            const checkPos = cornerPoint.clone().add(
+              newDirection.multiplyScalar(this.config.bikeSpeed * i * 0.3)
+            );
+            if (this.wouldCollideAtPosition(checkPos, bikeId)) {
+              turnSafe = false;
+              console.log(`🚨 TURN BLOCKED [${bikeId}]: Future position ${i} collision detected`);
+              break;
+            }
+          }
+        }
+        
+        // REINFORCED ANTI-PHASING: Enhanced turn validation during grinding
+        if (turnSafe) {
+          // When grinding and turning, do EXTRA validation to prevent any possibility of phasing
+          if (bike.state.grindOffset > 0 || bike.state.collision) {
+            // Check multiple points around the turn with tighter spacing
+            const checkPoints = [
+              cornerPoint,
+              cornerPoint.clone().add(newDirection.multiplyScalar(this.config.bikeSpeed * 0.2)),
+              cornerPoint.clone().add(newDirection.multiplyScalar(this.config.bikeSpeed * 0.4)),
+              cornerPoint.clone().add(newDirection.multiplyScalar(this.config.bikeSpeed * 0.6)),
+              cornerPoint.clone().add(newDirection.multiplyScalar(this.config.bikeSpeed * 0.8)),
+              postTurnPos
+            ];
+            
+            for (let i = 0; i < checkPoints.length; i++) {
+              const point = checkPoints[i];
+              if (this.wouldCollideAtPosition(point, bikeId)) {
+                turnSafe = false;
+                console.log(`🚨 GRINDING TURN BLOCKED [${bikeId}]: Turn would cause phasing at check point ${i}`);
+                break;
+              }
+            }
+            
+            // ADDITIONAL PHASING PREVENTION: Check perpendicular points
+            if (turnSafe) {
+              const perpendicular = new THREE.Vector3(-newDirection.z, 0, newDirection.x);
+              const sideChecks = [
+                cornerPoint.clone().add(perpendicular.multiplyScalar(0.1)),
+                cornerPoint.clone().add(perpendicular.multiplyScalar(-0.1))
+              ];
+              
+              for (const sidePoint of sideChecks) {
+                if (this.wouldCollideAtPosition(sidePoint, bikeId)) {
+                  turnSafe = false;
+                  console.log(`🚨 GRINDING TURN BLOCKED [${bikeId}]: Side collision detected`);
+                  break;
+                }
+              }
+            }
+          }
+        }
+          if (turnSafe) {
+          // Turn is safe - execute it
+          console.log(`✅ TURN EXECUTED [${bikeId}]: Turn approved and being executed`);
+          
+          // Create corner trail point only if position wasn't already reset with smooth segments
+          if (!positionWasReset && bike.state.trail.length > 0) {
+            const lastPoint = bike.state.trail[bike.state.trail.length - 1];
+            if (lastPoint.distanceTo(bike.state.position) > 0.01) {
+              bike.newTrailSegments.push({ start: lastPoint.clone(), end: bike.state.position.clone() });
+              bike.state.trail.push(bike.state.position.clone());
+              bike.trailFrames.push(this.frameCount);
+            }
+          }
+
+          bike.turnQueue.shift(); // Remove the turn from queue
           bike.state.rotation = newRotation;
           bike.state.lastTurnFrame = this.frameCount;
+          
+          // FINAL ANTI-PHASING VALIDATION: After executing turn, verify we haven't ended up in a collision
+          // If we have, immediately reset position again
+          if (this.wouldCollideAtPosition(bike.state.position, bikeId)) {
+            console.log(`🚨 POST-TURN COLLISION DETECTED [${bikeId}]: Applying emergency position correction`);
+            if (bike.state.grindNormal) {
+              const emergencyNormal = bike.state.grindNormal.clone().normalize();
+              const emergencyDistance = (this.config.trailWidth + 0.1) * 2.0; // Even larger safety margin
+              const emergencyPosition = bike.state.position.clone().add(
+                emergencyNormal.multiplyScalar(emergencyDistance)
+              );
+              bike.state.position = bike.physics.clampToBoundary(emergencyPosition);
+              console.log(`📍 Emergency position correction applied [${bikeId}]: (${bike.state.position.x.toFixed(3)}, ${bike.state.position.z.toFixed(3)})`);
+            }
+          }
         }
       }
 
@@ -310,6 +438,14 @@ export class MultiplayerGameEngine {
         const brakeProgress = energyUsed / this.config.brakeMaxEnergy;
         const speedMultiplier = 1.0 - (brakeProgress * (1.0 - this.config.brakeSpeedReduction));
         currentSpeed *= speedMultiplier;
+      }
+
+      // Slight wall-grind speed boost when near walls (non-invasive, prior to collision check)
+      const distanceToWallForAccelPre = this.calculateDistanceToNearestWall(bike.state.position);
+      if (distanceToWallForAccelPre < this.config.wallNear && (bike.state.grindOffset > 0 || bike.state.collision)) {
+        const wallProximity = Math.max(0, (this.config.wallNear - distanceToWallForAccelPre) / this.config.wallNear);
+        const speedBoost = this.config.accelBase * wallProximity;
+        currentSpeed += speedBoost;
       }
       
       const potentialPosition = bike.state.position.clone().add(
@@ -365,22 +501,30 @@ export class MultiplayerGameEngine {
         const normalizedDirection = direction.clone().normalize();
         const normalizedPush = normalizedDirection.dot(normalizedNormal);
         
+        bike.state.collision = true;
+        bike.lastHitFrame = this.frameCount;
+        bike.lastDamageType = 'collision';
+        
         if (normalizedPush < -0.6) {
-          headOn = true;
+          // Head-on collision - moderate damage to discourage spam but allow skilled play
           bike.state.grindOffset = Math.min(bike.state.grindOffset + 0.02, 0.3);
-          bike.state.health = Math.max(0, bike.state.health - 1.2);
-          bike.lastHitFrame = this.frameCount;
-          bike.lastDamageType = 'collision';
+          bike.state.health = Math.max(0, bike.state.health - 8);
           healthChanged = true;
         } else {
+          // Grinding - no health damage; build up grind offset for positioning
           bike.state.grindOffset = Math.min(bike.state.grindOffset + 0.01, 0.3);
         }
         
-        // Store the grind normal for turn checking
+        // Store the grind normal for turn checking (CRITICAL for anti-phasing)
         bike.state.grindNormal = normalizedNormal;
-        newPosition.add(collision.normal.clone().multiplyScalar(-bike.state.grindOffset));
+        
+        // REINFORCED POSITIONING: Apply stronger position adjustment during grinding
+        const adjustmentMultiplier = bike.state.grindOffset > 0.15 ? 1.5 : 1.0; // Stronger push when grinding heavily
+        newPosition.add(collision.normal.clone().multiplyScalar(-bike.state.grindOffset * adjustmentMultiplier));
       } else {
+        // No collision - reset grindOffset and collision state
         bike.state.grindOffset = 0;
+        bike.state.collision = false;
         bike.state.grindNormal = null;
       }
       
@@ -391,24 +535,118 @@ export class MultiplayerGameEngine {
         bike.state.isGrinding = false;
       }
 
-      // Update position
+      // Update position (use collision-corrected position)
       bike.state.position = newPosition;
 
       // Handle zone damage
       const isOutsideRing = this.arena.isPositionOutsideRing(newPosition);
-      
       if (isOutsideRing) {
         bike.outsideRingFrames++;
-        bike.state.health = Math.max(0, bike.state.health - this.arena.getRingDepletionPerFrame());
+        if (bike.outsideRingFrames === 1) {
+          console.log(`MP 🚧 ENTERED OUTSIDE RING [${bikeId}] at frame ${this.frameCount}`);
+        }
+        const before = bike.state.health;
+        const zoneDamage = this.arena.getRingDepletionPerFrame();
+        bike.state.health = Math.max(0, bike.state.health - zoneDamage);
         bike.lastDamageType = 'zone';
+        bike.lastHitFrame = this.frameCount; // Update lastHitFrame to prevent immediate health regen
         healthChanged = true;
+        if (this.frameCount % 60 === 0) {
+          console.log(`MP 🔴 ZONE DAMAGE [${bikeId}]: ${before.toFixed(3)} -> ${bike.state.health.toFixed(3)} (-${zoneDamage.toFixed(4)})`);
+        }
       } else {
+        if (bike.outsideRingFrames > 0) {
+          console.log(`MP ✅ RE-ENTERED RING [${bikeId}] at frame ${this.frameCount}`);
+        }
         bike.outsideRingFrames = 0;
       }
 
       // Handle health regeneration
       const framesSinceHit = this.frameCount - bike.lastHitFrame;
-      if (!headOn && !isOutsideRing && framesSinceHit > this.config.regenDelayFrames && bike.state.health < bike.state.maxHealth) {
+      
+      // COMPREHENSIVE STUCK DETECTION: Prevent corner camping and grinding exploits
+      let isStuckInCorner = false;
+      
+      // PRIMARY DETECTION: Trail-based movement detection
+      if (bike.state.trail.length >= 4) {
+        const recentPositions = bike.state.trail.slice(-4);
+        let maxMovement = 0;
+        
+        for (let i = 1; i < recentPositions.length; i++) {
+          const movement = recentPositions[i].distanceTo(recentPositions[i-1]);
+          maxMovement = Math.max(maxMovement, movement);
+        }
+        
+        if (maxMovement < 0.02) {
+          const nearWall = this.calculateDistanceToNearestWall(bike.state.position) < 0.25;
+          if (nearWall) {
+            isStuckInCorner = true;
+            bike.state.health = Math.max(0, bike.state.health - 15);
+            bike.lastHitFrame = this.frameCount;
+            bike.lastDamageType = 'collision';
+            healthChanged = true;
+            console.log(`🏪 CORNER STUCK [${bikeId}]: Applying damage (15) for being stuck near wall`);
+          }
+        }
+      }
+      
+      // SECONDARY DETECTION: Position-based stuck detection (more reliable for grinding scenarios)
+      if (!isStuckInCorner) {
+        const currentPos = bike.state.position;
+        
+        // Add current position to history
+        bike.positionHistory.push(currentPos.clone());
+        
+        // Keep only last 8 positions (about 0.13 seconds at 60fps)
+        if (bike.positionHistory.length > 8) {
+          bike.positionHistory.shift();
+        }
+        
+        // Check if we have enough history and are stuck
+        if (bike.positionHistory.length >= 6) {
+          const oldPos = bike.positionHistory[0];
+          const totalDistance = currentPos.distanceTo(oldPos);
+          
+          // If bike has barely moved over 6 frames AND is colliding
+          if (totalDistance < 0.08 && (bike.state.collision || bike.state.grindOffset > 0)) {
+            const nearWall = this.calculateDistanceToNearestWall(bike.state.position) < 0.3;
+            if (nearWall) {
+              isStuckInCorner = true;
+              bike.state.health = Math.max(0, bike.state.health - 0.7);
+              bike.lastHitFrame = this.frameCount;
+              bike.lastDamageType = 'collision';
+              healthChanged = true;
+              console.log(`🚨 POSITION STUCK [${bikeId}]: Applying damage (0.7) for being stuck while colliding`);
+            }
+          }
+        }
+      }
+      
+      // TERTIARY DETECTION: Wedge detection for tight spaces
+      if (!isStuckInCorner && bike.state.trail.length >= 3) {
+        const distanceToWall = this.calculateDistanceToNearestWall(bike.state.position);
+        
+        if (distanceToWall < 0.15) {
+          const recentPositions = bike.state.trail.slice(-3);
+          let totalMovement = 0;
+          
+          for (let i = 1; i < recentPositions.length; i++) {
+            totalMovement += recentPositions[i].distanceTo(recentPositions[i-1]);
+          }
+          
+          if (totalMovement < 0.04) {
+            isStuckInCorner = true;
+            bike.state.health = Math.max(0, bike.state.health - 20);
+            bike.lastHitFrame = this.frameCount;
+            bike.lastDamageType = 'collision';
+            healthChanged = true;
+            console.log(`🔧 WEDGE DETECTED [${bikeId}]: Applying damage (20) for being wedged in corner`);
+          }
+        }
+      }
+      
+      // Health regeneration - PREVENT regeneration when stuck in corner
+      if (!headOn && !isOutsideRing && !isStuckInCorner && framesSinceHit > this.config.regenDelayFrames && bike.state.health < bike.state.maxHealth) {
         const regenRate = bike.lastDamageType === 'zone' ? this.config.slowRegenRate : this.config.fastRegenRate;
         bike.state.health = Math.min(bike.state.maxHealth, bike.state.health + regenRate);
         healthChanged = true;
@@ -797,7 +1035,7 @@ Grace Frames: ${playerBike.state.graceFramesRemaining}`;
     return minDistance;
   }
 
-  private wouldCollideAtPosition(position: THREE.Vector3, excludeBikeId: string): boolean {
+  public wouldCollideAtPosition(position: THREE.Vector3, excludeBikeId: string): boolean {
     // Check boundary collision
     const limit = this.config.boundaryLimit - 0.08;
     if (Math.abs(position.x) > limit || Math.abs(position.z) > limit) {

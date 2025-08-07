@@ -2,11 +2,12 @@ import { GameConfig } from './types';
 
 export const DEFAULT_CONFIG: GameConfig = {
   // Bike constants - optimized for performance and proper grinding
-  bikeSpeed: 0.061,           
-  speedTarget: 0.061,         
+  bikeSpeed: 0.050,           // Adjusted from 0.045 for better balance
+  maxHealth: 122,             // ~30% more than 94 to lengthen TTK consistently across modes
+  speedTarget: 0.050,         // Keep consistent with bikeSpeed         
   cycleSpeedDecayBelow: 0.01, 
   cycleSpeedDecayAbove: 0.002,
-  turnDelayFrames: 20,        
+  turnDelayFrames: 22,        // Increased slightly from 20 for more deliberate turns
   boundaryLimit: 44.975,
   regenDelayFrames: 60,
   
@@ -28,9 +29,9 @@ export const DEFAULT_CONFIG: GameConfig = {
   ringDepletionFrames: 25 * 60,
   ringSpinSpeed: 0.0005,
   
-  // Health regeneration
-  slowRegenRate: 0.03,
-  fastRegenRate: 0.2,
+  // Health regeneration - slowed down for more challenging gameplay
+  slowRegenRate: 0.01,        // Reduced from 0.03 for slower recovery
+  fastRegenRate: 0.05,        // Reduced from 0.2 for slower recovery
   
   // Grace period system
   graceFrames: 45,
@@ -43,14 +44,14 @@ export const DEFAULT_CONFIG: GameConfig = {
   brakeSpeedReduction: 0.5,
   brakeForce: 0.003,          
   
-  // Wall acceleration system - minimal for performance
-  accelBase: 0.001,           // Very small
+  // Wall acceleration system - enhanced for wall grinding
+  accelBase: 0.008,           // Increased for noticeable effect
   rimMult: 0,                 
-  selfMult: 1,                
+  selfMult: 0.5,              // Reduced effect on own trail
   teamMult: 1,                
   enemyMult: 1,               
-  accelOffset: 0.1,           
-  wallNear: 0.3,              // Smaller range
+  accelOffset: 0.05,          // Closer to wall for activation
+  wallNear: 0.2,              // Smaller activation range
   
   // Explosion system
   explRadius: 2,

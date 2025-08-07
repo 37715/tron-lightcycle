@@ -16,8 +16,7 @@ export class GameEngine {
   private segmentsToRemove = 0;
   
   // Anti-phasing additions
-  private lastTurnDirection: TurnDirection | null = null;
-  private consecutiveTurnAttempts = 0;
+  private positionHistory: THREE.Vector3[] = [];
 
   // Debug system
   private debugState: DebugState = {
@@ -53,8 +52,8 @@ export class GameEngine {
       speed: this.config.bikeSpeed,
       speedTarget: this.config.speedTarget,
       lastTurnFrame: 0,
-      health: 156,
-      maxHealth: 156,
+      health: this.config.maxHealth ?? 94,
+      maxHealth: this.config.maxHealth ?? 94,
       grindOffset: 0,
       grindNormal: null,
       graceFramesRemaining: 0,
@@ -109,17 +108,6 @@ export class GameEngine {
       return;
     }
     
-    // ANTI-PHASING FIX 2: Prevent rapid opposite turns
-    if (this.lastTurnDirection && 
-        ((this.lastTurnDirection === 'left' && direction === 'right') ||
-         (this.lastTurnDirection === 'right' && direction === 'left'))) {
-      const framesSinceLastTurn = this.frameCount - this.bikeState.lastTurnFrame;
-      if (framesSinceLastTurn < this.config.turnDelayFrames * 2) {
-        // Don't allow opposite turn too quickly
-        return;
-      }
-    }
-    
     this.bikeState.turnQueue.push(direction);
   }
 
@@ -147,45 +135,7 @@ export class GameEngine {
     }
   }
 
-  // ANTI-PHASING FIX 3: Enhanced collision detection for rectangular sweep
-  private checkRectangularSweep(
-    startPos: THREE.Vector3,
-    endPos: THREE.Vector3,
-    width: number = 0.16, // Bike width
-    skipRecent: number = 5
-  ): boolean {
-    // Create a rectangular area between start and end positions
-    const dir = new THREE.Vector3().subVectors(endPos, startPos);
-    const length = dir.length();
-    
-    if (length < 0.001) return false;
-    
-    dir.normalize();
-    
-    // Get perpendicular direction for width
-    const perp = new THREE.Vector3(-dir.z, 0, dir.x);
-    
-    // Check multiple points across the width
-    const widthSteps = 3;
-    const lengthSteps = Math.max(2, Math.ceil(length / 0.1));
-    
-    for (let w = 0; w <= widthSteps; w++) {
-      const widthOffset = (w / widthSteps - 0.5) * width;
-      
-      for (let l = 0; l <= lengthSteps; l++) {
-        const t = l / lengthSteps;
-        const checkPoint = startPos.clone()
-          .add(dir.clone().multiplyScalar(length * t))
-          .add(perp.clone().multiplyScalar(widthOffset));
-        
-        if (this.checkCollisionAtPosition(checkPoint, skipRecent)) {
-          return true;
-        }
-      }
-    }
-    
-    return false;
-  }
+  // ANTI-PHASING FIX 3: Enhanced collision detection at specific positions
 
   private checkCollisionAtPosition(position: THREE.Vector3, skipRecent: number = 5): boolean {
     // Check boundary collision
@@ -194,8 +144,8 @@ export class GameEngine {
       return true;
     }
     
-    // Check trail collision with larger buffer for safety
-    const safeDistance = this.config.trailWidth + 0.06; // Increased buffer
+    // Check trail collision with proper buffer for safety
+    const safeDistance = this.config.trailWidth + 0.06; // Proper safety buffer
     const maxCheckIndex = Math.max(0, this.bikeState.trail.length - skipRecent);
     
     for (let i = 0; i < maxCheckIndex - 1; i++) {
@@ -222,50 +172,6 @@ export class GameEngine {
     return false;
   }
 
-  // Check if a line segment intersects with any trail or boundary
-  private checkLineCollision(start: THREE.Vector3, end: THREE.Vector3, skipRecent: number = 5): boolean {
-    // Check if line segment crosses boundary
-    const limit = this.config.boundaryLimit - 0.08;
-    
-    // Check each boundary wall
-    if ((start.x <= -limit && end.x >= -limit) || (start.x >= -limit && end.x <= -limit) ||
-        (start.x <= limit && end.x >= limit) || (start.x >= limit && end.x <= limit) ||
-        (start.z <= -limit && end.z >= -limit) || (start.z >= -limit && end.z <= -limit) ||
-        (start.z <= limit && end.z >= limit) || (start.z >= limit && end.z <= limit)) {
-      return true;
-    }
-    
-    // Check trail intersections
-    const maxCheckIndex = Math.max(0, this.bikeState.trail.length - skipRecent);
-    
-    for (let i = 0; i < maxCheckIndex - 1; i++) {
-      const trailStart = this.bikeState.trail[i];
-      const trailEnd = this.bikeState.trail[i + 1];
-      
-      if (this.lineSegmentsIntersect(start, end, trailStart, trailEnd)) {
-        return true;
-      }
-    }
-    
-    return false;
-  }
-
-  // Check if two line segments intersect
-  private lineSegmentsIntersect(p1: THREE.Vector3, p2: THREE.Vector3, p3: THREE.Vector3, p4: THREE.Vector3): boolean {
-    const d1 = new THREE.Vector3().subVectors(p2, p1);
-    const d2 = new THREE.Vector3().subVectors(p4, p3);
-    const d3 = new THREE.Vector3().subVectors(p1, p3);
-    
-    const denominator = d1.x * d2.z - d1.z * d2.x;
-    
-    if (Math.abs(denominator) < 0.0001) return false;
-    
-    const t1 = (d3.x * d2.z - d3.z * d2.x) / denominator;
-    const t2 = (d3.x * d1.z - d3.z * d1.x) / denominator;
-    
-    return t1 >= 0 && t1 <= 1 && t2 >= 0 && t2 <= 1;
-  }
-
   public update(): { healthChanged: boolean; newHealth: number } {
     this.frameCount++;
     
@@ -284,10 +190,6 @@ export class GameEngine {
     // Update debug geometry
     this.updateDebugGeometry();
 
-    // Store initial state
-    const startPosition = this.bikeState.position.clone();
-    const startRotation = this.bikeState.rotation;
-
     // Calculate direction and movement
     let direction = new THREE.Vector3(
       Math.sin(this.bikeState.rotation),
@@ -296,6 +198,15 @@ export class GameEngine {
     );
     
     let currentSpeed = this.bikeState.speed;
+    
+    // Wall acceleration - speed up when near walls/trails
+    const wallDistance = this.calculateDistanceToNearestWall();
+    if (wallDistance < this.config.wallNear) {
+      const wallProximity = Math.max(0, (this.config.wallNear - wallDistance) / this.config.wallNear);
+      const speedBoost = this.config.accelBase * wallProximity;
+      currentSpeed += speedBoost;
+    }
+    
     if (this.bikeState.isBraking && this.bikeState.brakeEnergy > 0) {
       const energyUsed = this.config.brakeMaxEnergy - this.bikeState.brakeEnergy;
       const brakeProgress = energyUsed / this.config.brakeMaxEnergy;
@@ -303,8 +214,7 @@ export class GameEngine {
       currentSpeed *= speedMultiplier;
     }
     
-    // Track if we execute a turn this frame
-    let turnExecuted = false;
+    // Track rotation changes
     let newRotation = this.bikeState.rotation;
     
     // Handle turns
@@ -343,59 +253,87 @@ export class GameEngine {
       // This checks the entire area the bike would occupy during the turn
       let turnSafe = true;
       
-      // NEW ANTI-PHASING: Reset position before turning if grinding
+      // INVISIBLE ANTI-PHASING FIX: Reset position when grinding + turning BUT make it visually smooth
+      // When the bike attempts to turn while grinding, reset the bike position to be exactly 
+      // trailWidth + 0.02 units away from the wall BEFORE processing the turn.
+      let positionWasReset = false;
       if ((this.bikeState.grindOffset > 0 || this.bikeState.collision) && this.bikeState.grindNormal) {
-        console.log(`🔧 POSITION RESET: Grinding detected, resetting bike position before turn`);
+        console.log(`🔧 INVISIBLE ANTI-PHASING: Grinding detected, performing invisible position reset`);
         
-        // Calculate safe distance from wall
-        const safeDistance = this.config.trailWidth + 0.1;
+        // Store the original position for smooth trail creation
+        const originalPosition = this.bikeState.position.clone();
+        
+        // Use smaller safe distance for tighter gameplay but still effective anti-phasing
+        const safeDistance = this.config.trailWidth + 0.02;
         const normalizedGrindNormal = this.bikeState.grindNormal.clone().normalize();
         
-        // Push bike away from wall by safe distance
-        const safePosition = this.bikeState.position.clone().add(
+        // Push bike away from wall by safe distance BEFORE processing the turn
+        const safePosition = originalPosition.clone().add(
           normalizedGrindNormal.multiplyScalar(safeDistance)
         );
         
         // Clamp to boundaries and update position
         this.bikeState.position = this.bikePhysics.clampToBoundary(safePosition);
         
+        // INVISIBLE TRAIL SMOOTHING: Create smooth trail segment from original to reset position
+        if (this.bikeState.trail.length > 0) {
+          const lastTrailPoint = this.bikeState.trail[this.bikeState.trail.length - 1];
+          const resetPosition = this.bikeState.position.clone();
+          
+          // Only create smooth segment if there's meaningful distance AND the reset is invisible to player
+          if (lastTrailPoint.distanceTo(resetPosition) > 0.01) {
+            // Add intermediate points for ultra-smooth visual transition
+            const steps = Math.max(2, Math.ceil(lastTrailPoint.distanceTo(resetPosition) / 0.02));
+            for (let i = 1; i <= steps; i++) {
+              const t = i / steps;
+              const intermediatePoint = lastTrailPoint.clone().lerp(resetPosition, t);
+              
+              this.newTrailSegments.push({ 
+                start: i === 1 ? lastTrailPoint.clone() : this.bikeState.trail[this.bikeState.trail.length - 1].clone(), 
+                end: intermediatePoint.clone() 
+              });
+              
+              if (i === steps) {
+                // Final point is the reset position
+                this.bikeState.trail.push(resetPosition.clone());
+                this.trailFrames.push(this.frameCount);
+              } else {
+                // Add intermediate trail points for smoothness
+                this.bikeState.trail.push(intermediatePoint.clone());
+                this.trailFrames.push(this.frameCount);
+              }
+            }
+            positionWasReset = true;
+          }
+        }
+        
         // Update corner point to new safe position
         cornerPoint.copy(this.bikeState.position);
         
-        console.log(`📍 Position reset to: (${this.bikeState.position.x.toFixed(3)}, ${this.bikeState.position.z.toFixed(3)})`);
+        console.log(`📍 Invisible position reset: (${originalPosition.x.toFixed(3)}, ${originalPosition.z.toFixed(3)}) → (${this.bikeState.position.x.toFixed(3)}, ${this.bikeState.position.z.toFixed(3)})`);
       }
       
-      // First, check if we can place a trail segment at the corner
+      // SIMPLE TURN SAFETY CHECKS
+      // Check if we can place a trail segment at the corner
       if (turnSafe && this.checkCollisionAtPosition(cornerPoint, 2)) {
         turnSafe = false;
+        console.log(`🚨 TURN BLOCKED: Corner position collision detected`);
       }
-      
-      // Check the movement after turn with rectangular sweep
-      if (turnSafe && this.checkRectangularSweep(cornerPoint, postTurnPos, 0.16, 2)) {
+
+      // Check the movement after turn
+      if (turnSafe && this.checkCollisionAtPosition(postTurnPos, 2)) {
         turnSafe = false;
-      }
-      
-      // Additional safety: check a few points ahead in the new direction
-      if (turnSafe) {
-        for (let i = 1; i <= 3; i++) {
-          const checkPos = cornerPoint.clone().add(
-            newDirection.multiplyScalar(currentSpeed * i)
-          );
-          if (this.checkCollisionAtPosition(checkPos, 2)) {
-            turnSafe = false;
-            break;
-          }
-        }
+        console.log(`🚨 TURN BLOCKED: Post-turn position collision detected`);
       }
       
       if (turnSafe) {
         // Turn is safe - execute it
-        turnExecuted = true;
+        console.log(`✅ TURN EXECUTED: Turn approved and being executed`);
         
-        // ANTI-PHASING FIX 6: Create trail point BEFORE rotating
-        // This ensures no gap between trail segments
-        if (this.bikeState.trail.length > 0) {
+        // Create corner trail point only if position wasn't already reset
+        if (!positionWasReset && this.bikeState.trail.length > 0) {
           const lastPoint = this.bikeState.trail[this.bikeState.trail.length - 1];
+          
           if (lastPoint.distanceTo(cornerPoint) > 0.01) {
             this.newTrailSegments.push({ start: lastPoint.clone(), end: cornerPoint.clone() });
             this.bikeState.trail.push(cornerPoint.clone());
@@ -403,22 +341,14 @@ export class GameEngine {
           }
         }
         
-        // Now update rotation
+        // Update rotation and direction
         this.bikeState.rotation = newRotation;
         direction = newDirection;
         this.bikeState.turnQueue.shift();
         this.bikeState.lastTurnFrame = this.frameCount;
-        this.lastTurnDirection = turn;
-        this.consecutiveTurnAttempts = 0;
       } else {
-        // Turn would cause collision
-        this.consecutiveTurnAttempts++;
-        
-        // ANTI-PHASING FIX 7: Clear queue if multiple failed attempts
-        if (this.consecutiveTurnAttempts > 2) {
-          this.bikeState.turnQueue = [];
-          this.consecutiveTurnAttempts = 0;
-        }
+        // Turn would cause collision - just don't turn, but don't block future turns
+        console.log(`🚨 TURN BLOCKED: Turn would cause collision, but bike remains responsive`);
       }
     }
 
@@ -427,14 +357,6 @@ export class GameEngine {
       direction.multiplyScalar(currentSpeed)
     );
 
-    // ANTI-PHASING FIX 8: Use rectangular sweep for movement validation
-    let movementSafe = !this.checkRectangularSweep(
-      this.bikeState.position, 
-      potentialPosition, 
-      0.16, 
-      3
-    );
-    
     // Use collision system for final position
     const collision = this.bikePhysics.checkCollisions(
       potentialPosition,
@@ -444,12 +366,6 @@ export class GameEngine {
 
     let newPosition = collision.corrected.clone();
     newPosition = this.bikePhysics.clampToBoundary(newPosition);
-    
-    // If movement would pass through something, don't move at all
-    if (!movementSafe) {
-      newPosition = this.bikeState.position.clone();
-      collision.hit = true;
-    }
     
     // Log collision check for debugging
     const distanceToWall = this.calculateDistanceToNearestWall();
@@ -468,12 +384,12 @@ export class GameEngine {
       this.lastDamageType = 'collision';
       
       if (normalizedPush < -0.6) {
-        // Head-on collision
+        // Head-on collision - moderate damage to discourage spam but allow skilled play
         this.bikeState.grindOffset = Math.min(this.bikeState.grindOffset + 0.02, 0.3);
-        this.bikeState.health = Math.max(0, this.bikeState.health - 1.2);
+        this.bikeState.health = Math.max(0, this.bikeState.health - 8);
         healthChanged = true;
       } else {
-        // Grinding
+        // Grinding - no damage (back to original behavior)
         this.bikeState.grindOffset = Math.min(this.bikeState.grindOffset + 0.01, 0.3);
       }
       
@@ -489,6 +405,92 @@ export class GameEngine {
       this.bikeState.grindNormal = null;
     }
     
+    // CORNER STUCK DETECTION: If bike hasn't moved much and is near walls, apply damage
+    // This ensures health always depletes when truly stuck, preventing corner camping and phasing exploits
+    let isStuckInCorner = false;
+    
+    // PRIMARY DETECTION: Trail-based movement detection
+    if (this.bikeState.trail.length >= 4) {
+      const recentPositions = this.bikeState.trail.slice(-4);
+      let maxMovement = 0;
+      
+      for (let i = 1; i < recentPositions.length; i++) {
+        const movement = recentPositions[i].distanceTo(recentPositions[i-1]);
+        maxMovement = Math.max(maxMovement, movement);
+      }
+      
+      // If bike hasn't moved much (stuck) and is near walls/trails
+      if (maxMovement < 0.02) {
+        const nearWall = this.calculateDistanceToNearestWall() < 0.25;
+                  if (nearWall) {
+            isStuckInCorner = true;
+            this.bikeState.health = Math.max(0, this.bikeState.health - 15);
+            this.lastHitFrame = this.frameCount;
+            this.lastDamageType = 'collision';
+            healthChanged = true;
+          console.log(`🏪 CORNER STUCK: Applying damage (15) for being stuck near wall`);
+        }
+      }
+    }
+    
+    // SECONDARY DETECTION: Position-based stuck detection (more reliable)
+    if (!isStuckInCorner) {
+      // Track actual position changes over time, not trail segments
+      const currentPos = this.bikeState.position;
+      
+      // Add current position to history
+      this.positionHistory.push(currentPos.clone());
+      
+      // Keep only last 8 positions (about 0.13 seconds at 60fps)
+      if (this.positionHistory.length > 8) {
+        this.positionHistory.shift();
+      }
+      
+      // Check if we have enough history and are stuck
+      if (this.positionHistory.length >= 6) {
+        const oldPos = this.positionHistory[0];
+        const totalDistance = currentPos.distanceTo(oldPos);
+        
+        // If bike has barely moved over 6 frames AND is colliding
+        if (totalDistance < 0.08 && (this.bikeState.collision || this.bikeState.grindOffset > 0)) {
+          const nearWall = this.calculateDistanceToNearestWall() < 0.3;
+          if (nearWall) {
+            isStuckInCorner = true;
+            this.bikeState.health = Math.max(0, this.bikeState.health - 0.7);
+            this.lastHitFrame = this.frameCount;
+            this.lastDamageType = 'collision';
+            healthChanged = true;
+            console.log(`🚨 POSITION STUCK: Applying damage (0.7) for being stuck while colliding`);
+          }
+        }
+      }
+    }
+    
+    // ADDITIONAL CORNER WEDGE DETECTION: Check if bike is wedged between multiple walls
+    if (!isStuckInCorner && this.bikeState.trail.length >= 3) {
+      const distanceToWall = this.calculateDistanceToNearestWall();
+      
+      // If very close to walls and barely moving
+      if (distanceToWall < 0.15) {
+        const recentPositions = this.bikeState.trail.slice(-3);
+        let totalMovement = 0;
+        
+        for (let i = 1; i < recentPositions.length; i++) {
+          totalMovement += recentPositions[i].distanceTo(recentPositions[i-1]);
+        }
+        
+        // If total movement over last 3 positions is very small
+        if (totalMovement < 0.04) {
+          isStuckInCorner = true;
+                      this.bikeState.health = Math.max(0, this.bikeState.health - 20);
+            this.lastHitFrame = this.frameCount;
+            this.lastDamageType = 'collision';
+            healthChanged = true;
+          console.log(`🔧 WEDGE DETECTED: Applying damage (20) for being wedged in corner`);
+        }
+      }
+    }
+    
     // Set isGrinding based on grindOffset
     if (this.bikeState.grindOffset > 0) {
       this.bikeState.isGrinding = true;
@@ -496,10 +498,11 @@ export class GameEngine {
       this.bikeState.isGrinding = false;
     }
 
-    // FINAL SAFETY: Ensure we never end up inside a collision
+    // ENHANCED FINAL SAFETY: Ensure we never end up inside a collision
     if (this.checkCollisionAtPosition(newPosition, 3)) {
       // Revert to current position
       newPosition = this.bikeState.position.clone();
+      console.log(`� COLLISION DETECTED: Preventing movement into wall`);
     }
 
     // Update position
@@ -512,19 +515,38 @@ export class GameEngine {
 
     // Handle zone damage
     const isOutsideRing = this.arena.isPositionOutsideRing(this.bikeState.position);
+    const ringRadius = this.arena.getCurrentRingRadius();
+    const distanceFromCenter = Math.sqrt(this.bikeState.position.x * this.bikeState.position.x + this.bikeState.position.z * this.bikeState.position.z);
+    
+    // Debug zone detection periodically
+    if (this.frameCount % 60 === 0) { // Every second
+      console.log(`🔵 ZONE CHECK: position(${this.bikeState.position.x.toFixed(2)}, ${this.bikeState.position.z.toFixed(2)}), distance: ${distanceFromCenter.toFixed(2)}, ringRadius: ${ringRadius.toFixed(2)}, isOutside: ${isOutsideRing}`);
+    }
     
     if (isOutsideRing) {
       this.outsideRingFrames++;
-      this.bikeState.health = Math.max(0, this.bikeState.health - this.arena.getRingDepletionPerFrame());
+      const zoneDamage = this.arena.getRingDepletionPerFrame();
+      const healthBefore = this.bikeState.health;
+      
+      // ZONE DAMAGE FIX: Always apply zone damage regardless of initial state
+      // This ensures damage applies even when bike is at full health initially
+      console.log(`🔍 PRE-DAMAGE: health=${healthBefore}, maxHealth=${this.bikeState.maxHealth}, zoneDamage=${zoneDamage}, isFullHealth=${healthBefore >= this.bikeState.maxHealth}`);
+      
+      this.bikeState.health = Math.max(0, this.bikeState.health - zoneDamage);
       this.lastDamageType = 'zone';
+      this.lastHitFrame = this.frameCount; // Update lastHitFrame to prevent immediate health regen
       healthChanged = true;
+      
+      // Enhanced debugging for zone damage investigation
+      console.log(`🔴 ZONE DAMAGE: health ${healthBefore.toFixed(6)} -> ${this.bikeState.health.toFixed(6)} (damage: ${zoneDamage.toFixed(6)}, frames outside: ${this.outsideRingFrames})`);
+      console.log(`🔍 POST-DAMAGE: frameCount=${this.frameCount}, lastHitFrame=${this.lastHitFrame}, healthChanged=${healthChanged}, healthDiff=${(healthBefore - this.bikeState.health).toFixed(6)}`);
     } else {
       this.outsideRingFrames = 0;
     }
 
-    // Health regeneration
+    // Health regeneration - PREVENT regeneration when stuck in corner
     const framesSinceHit = this.frameCount - this.lastHitFrame;
-    if (!this.bikeState.collision && !isOutsideRing && framesSinceHit > this.config.regenDelayFrames && this.bikeState.health < this.bikeState.maxHealth) {
+    if (!this.bikeState.collision && !isOutsideRing && !isStuckInCorner && framesSinceHit > this.config.regenDelayFrames && this.bikeState.health < this.bikeState.maxHealth) {
       const regenRate = this.lastDamageType === 'zone' ? this.config.slowRegenRate : this.config.fastRegenRate;
       this.bikeState.health = Math.min(this.bikeState.maxHealth, this.bikeState.health + regenRate);
       healthChanged = true;
@@ -605,8 +627,7 @@ export class GameEngine {
     this.trailFrames = [0];
     this.newTrailSegments = [];
     this.segmentsToRemove = 0;
-    this.lastTurnDirection = null;
-    this.consecutiveTurnAttempts = 0;
+    this.positionHistory = [];
   }
 
   public getTrailFrames(): number[] {
@@ -736,8 +757,8 @@ export class GameEngine {
     if (!this.debugState.enabled) return;
     
     // Update collision box (bike bounds)
-    const bikeWidth = 0.16;
-    const bikeLength = 0.2;
+    const bikeWidth = 0.12; // Reduced for tighter hitbox
+    const bikeLength = 0.16; // Also reduced slightly
     const pos = this.bikeState.position;
     const rot = this.bikeState.rotation;
     

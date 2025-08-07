@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 interface MainMenuProps {
   onStartPractice: () => void;
@@ -8,6 +8,42 @@ interface MainMenuProps {
 
 const MainMenu: React.FC<MainMenuProps> = ({ onStartPractice, onTutorial, onSettings }) => {
   const [view, setView] = useState<'main' | 'casual' | 'competitive'>('main');
+  const buttonsRef = useRef<HTMLButtonElement[]>([]);
+  const [focusedIndex, setFocusedIndex] = useState<number>(0);
+
+  useEffect(() => {
+    // Collect focusable buttons in current view
+    const container = document.querySelector('.menu-content');
+    if (!container) return;
+    const buttons = Array.from(container.querySelectorAll('button')) as HTMLButtonElement[];
+    buttonsRef.current = buttons.filter(b => !b.disabled);
+    if (buttonsRef.current.length > 0) {
+      setFocusedIndex(0);
+      buttonsRef.current[0].focus();
+    }
+  }, [view]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!buttonsRef.current.length) return;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        const next = (focusedIndex + 1) % buttonsRef.current.length;
+        setFocusedIndex(next);
+        buttonsRef.current[next]?.focus();
+      } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+        e.preventDefault();
+        const prev = (focusedIndex - 1 + buttonsRef.current.length) % buttonsRef.current.length;
+        setFocusedIndex(prev);
+        buttonsRef.current[prev]?.focus();
+      } else if (e.key === ' ' || e.key === 'Enter') {
+        e.preventDefault();
+        buttonsRef.current[focusedIndex]?.click();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [focusedIndex]);
 
   return (
     <div className="main-menu-container">

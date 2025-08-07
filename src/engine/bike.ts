@@ -20,8 +20,8 @@ export class BikePhysics {
   }
 
   public checkCollisionsWithSkip(position: THREE.Vector3, trail: THREE.Vector3[], bikeState: BikeState, segmentsToSkip: number = 2): CollisionResult {
-    const bikeHalfWidth = 0.08; // Reduced from 0.15 for smaller hitbox
-    const safetyMargin = 0.01; // Reduced from 0.02 for closer contact
+    const bikeHalfWidth = 0.06; // Reduced further for tighter hitbox
+    const safetyMargin = 0.005; // Reduced for much closer contact
 
     let hit = false;
     let normal: THREE.Vector3 | null = null;
@@ -86,11 +86,11 @@ export class BikePhysics {
         
         const isInsideTrail = dist < collisionDist;
         
-        // Simplified grinding check
+        // Simplified grinding check with proper thresholds
         let allowPass = false;
         if (wallKey) {
           const grindDepth = this.grindDepthMap[wallKey] || 0;
-          if (bikeState.grindOffset > grindDepth + 0.03) { // Reduced threshold
+          if (bikeState.grindOffset > grindDepth + 0.03) { // Reasonable threshold
             allowPass = true;
           }
         }
@@ -102,9 +102,9 @@ export class BikePhysics {
           if (pushDir.length() > 0.001) {
             pushDir.normalize();
             
-            // Minimal push-back for close contact
+            // Proper push-back to maintain collision integrity
             const penetrationDepth = collisionDist - dist;
-            const pushDistance = collisionDist + Math.max(penetrationDepth, 0.02) + 0.01; // Reduced push distance
+            const pushDistance = collisionDist + Math.max(penetrationDepth, 0.02) + 0.01;
             const safePoint = closestPoint.clone().add(pushDir.multiplyScalar(pushDistance));
             
             const currentDist = new THREE.Vector2(correctedX, correctedZ).distanceTo(new THREE.Vector2(position.x, position.z));

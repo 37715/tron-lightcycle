@@ -11,12 +11,15 @@ export class TrailRenderer {
   private tempQuaternion = new THREE.Quaternion();
   private tempScale = new THREE.Vector3();
   
-  private minRenderLength: number = 0.05;
-  private bikeHeight: number = 0.22; // Shorter to not poke out of bike
+  // Allow very short segments to avoid visible corner gaps
+  private minRenderLength: number = 0.005;
+  private bikeHeight: number = 0.22; // Will be set to full height to avoid post-lay growth wiggle
   
   private frameUpdateCount = 0;
 
   constructor(scene: THREE.Scene, private config: GameConfig, private color: number = 0x00ffff) {
+    // Start slightly shorter than full height for a quick grow-in effect
+    this.bikeHeight = Math.min(this.bikeHeight, this.config.trailHeight * 0.5);
     this.createTrailMesh(scene);
   }
 
@@ -30,7 +33,10 @@ export class TrailRenderer {
       emissive: new THREE.Color(this.color),
       emissiveIntensity: 0.4,
       transparent: false,
-      depthWrite: true
+      depthWrite: true,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1
     });
 
     this.mesh = new THREE.InstancedMesh(geometry, material, this.maxSegments);
@@ -59,6 +65,8 @@ export class TrailRenderer {
       return;
     }
 
+    // Slightly extend segments to ensure tiny overlaps and remove hairline gaps
+    const overlapEpsilon = 0.01;
     const midpoint = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
 
     // Simplified growing height - start at bike height
@@ -67,14 +75,20 @@ export class TrailRenderer {
     this.tempPosition.copy(midpoint);
     this.tempPosition.y = currentHeight / 2;
 
+    let finalLength = length;
+    if (length > 0) {
+      finalLength = length + overlapEpsilon;
+    }
     this.tempScale.set(
       this.config.trailWidth,
       currentHeight / this.config.trailHeight,
-      length
+      finalLength
     );
 
     if (length > 0.001) {
       direction.normalize();
+      // Shift midpoint along direction by half of the overlap to center the extended segment
+      this.tempPosition.add(direction.clone().multiplyScalar(overlapEpsilon * 0.5));
       this.tempQuaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
     } else {
       this.tempQuaternion.set(0, 0, 0, 1);
@@ -126,19 +140,19 @@ export class TrailRenderer {
       }
     }
     
-    // Simple height growth - grow segments over time
+    // Grow segments to full height quickly for nice visual without lateral reshaping
     if (this.frameUpdateCount % 5 === 0) {
       let needsUpdate = false;
       
       this.segmentQueue.forEach((segment, index) => {
         segment.age++;
         
-        // Grow height over 7 frames (faster growth)
+        // Grow height over 7 frames
         if (segment.age <= 7) {
           const growthProgress = segment.age / 7;
           const targetHeight = this.bikeHeight + (this.config.trailHeight - this.bikeHeight) * growthProgress;
           
-          // Decompose and update
+          // Decompose and update only Y components to avoid any lateral wiggle
           segment.matrix.decompose(this.tempPosition, this.tempQuaternion, this.tempScale);
           this.tempPosition.y = targetHeight / 2;
           this.tempScale.y = targetHeight / this.config.trailHeight;
@@ -157,7 +171,7 @@ export class TrailRenderer {
         }
       });
       
-      if (needsUpdate) {
+      if (needsUpdate && this.mesh.instanceMatrix) {
         this.mesh.instanceMatrix.needsUpdate = true;
       }
     }

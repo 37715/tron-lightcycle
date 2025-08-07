@@ -52,6 +52,7 @@ export interface BikeState {
 export interface GameConfig {
   // Bike constants
   bikeSpeed: number;
+  maxHealth?: number;  // Optional max health for zone damage calculation
   speedTarget: number;
   cycleSpeedDecayBelow: number;
   cycleSpeedDecayAbove: number;

@@ -9,7 +9,10 @@ export class Arena {
   constructor(private config: GameConfig) {
     this.currentRingRadius = config.ringInitialRadius;
     this.ringShrinkPerFrame = (config.ringInitialRadius - config.ringMinRadius) / config.ringShrinkTime;
-    this.ringDepletionPerFrame = 100 / config.ringDepletionFrames;
+    // HEALTH FIX: Use configurable max health for zone damage calculation
+    // Fallback to 100 for backward compatibility if maxHealth not specified
+    const baseHealth = config.maxHealth || 100;
+    this.ringDepletionPerFrame = baseHealth / config.ringDepletionFrames;
   }
 
   public getCurrentRingRadius(): number {

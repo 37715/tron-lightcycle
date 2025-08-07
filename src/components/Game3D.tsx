@@ -134,10 +134,12 @@ const Game3D: React.FC<Game3DProps> = ({
         onGameOverRef.current?.();
       }
 
-      // Health sync
-      const actualHealth = Math.max(0, Math.min(156, newHealth));
-      const healthPercentage = (actualHealth / 156) * 100;
-      setBikeHealth(prev => (Math.abs(prev - healthPercentage) > 0.1 ? healthPercentage : prev));
+      // Health sync (respect runtime max health)
+      const maxH = gameEngineRef.current.getBikeState().maxHealth;
+      const actualHealth = Math.max(0, Math.min(maxH, newHealth));
+      const healthPercentage = (actualHealth / maxH) * 100;
+      // Lower threshold so small zone damage steps are reflected immediately
+      setBikeHealth(prev => (Math.abs(prev - healthPercentage) > 0.01 ? healthPercentage : prev));
 
       // Brake energy sync – always set
       setBrakeEnergy(gameEngineRef.current.getBikeState().brakeEnergy);
