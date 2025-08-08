@@ -425,13 +425,13 @@ export class MultiplayerGameEngine {
         }
       }
 
-      // Move bike
+      // Move bike (adaptive sub-stepping to prevent tunneling through walls)
       const direction = new THREE.Vector3(
         Math.sin(bike.state.rotation),
         0,
         Math.cos(bike.state.rotation)
       );
-      
+
       let currentSpeed = bike.state.speed;
       if (bike.state.isBraking && bike.state.brakeEnergy > 0) {
         const energyUsed = this.config.brakeMaxEnergy - bike.state.brakeEnergy;
@@ -447,44 +447,66 @@ export class MultiplayerGameEngine {
         const speedBoost = this.config.accelBase * wallProximity;
         currentSpeed += speedBoost;
       }
-      
-      const potentialPosition = bike.state.position.clone().add(
-        direction.multiplyScalar(currentSpeed)
-      );
 
-      // ---------- Collision detection (self + opponents separately) ----------
-      // 1. Check against self trail (skip last 10 segments handled inside BikePhysics)
-      const selfTrail = [...bike.state.trail, potentialPosition];
-      let collision = bike.physics.checkCollisions(
-        potentialPosition,
-        selfTrail,
-        bike.state
-      );
+      // Determine sub-steps so each micro-move is shorter than trail width (prevents skipping across walls)
+      const moveVector = direction.clone().multiplyScalar(currentSpeed);
+      const maxStep = Math.max(0.25 * this.config.trailWidth, 0.004); // very small safety step
+      let subSteps = Math.max(1, Math.ceil(moveVector.length() / maxStep));
+      // If near a wall, be extra conservative
+      if (distanceToWallForAccelPre < this.config.wallNear) subSteps = Math.max(subSteps, 2 * subSteps);
 
-      // 2. Check against each opponent trail individually to avoid artificial bridging segments
-      if (!collision.hit) {
-        for (const [otherId, otherBike] of this.bikes.entries()) {
-          if (otherId === bikeId) continue;
-          if (otherBike.state.trail.length < 2) continue;
+      const stepVector = moveVector.clone().multiplyScalar(1 / subSteps);
+      let workingPosition = bike.state.position.clone();
+      let collision = { hit: false, corrected: workingPosition.clone(), normal: undefined as THREE.Vector3 | undefined } as any;
 
-          const opponentTrail = [...otherBike.state.trail, potentialPosition];
-          // Use stricter collision detection for opponent trails (don't skip recent segments)
-          const oppCollision = bike.physics.checkCollisionsWithSkip(
-            potentialPosition,
-            opponentTrail,
-            bike.state,
-            0  // Don't skip any segments for opponent trails
-          );
+      for (let stepIndex = 0; stepIndex < subSteps; stepIndex++) {
+        const potentialPosition = workingPosition.clone().add(stepVector);
 
-          if (oppCollision.hit) {
-            collision = oppCollision;
-            break;
+        // ---------- Collision detection (self + opponents separately) ----------
+        // 1. Check against self trail (skip last segments handled inside BikePhysics)
+        const selfTrail = [...bike.state.trail, potentialPosition];
+        collision = bike.physics.checkCollisions(
+          potentialPosition,
+          selfTrail,
+          bike.state
+        );
+
+        // 2. Check against each opponent trail individually to avoid artificial bridging segments
+        if (!collision.hit) {
+          for (const [otherId, otherBike] of this.bikes.entries()) {
+            if (otherId === bikeId) continue;
+            if (otherBike.state.trail.length < 2) continue;
+
+            const opponentTrail = [...otherBike.state.trail, potentialPosition];
+            const oppCollision = bike.physics.checkCollisionsWithSkip(
+              potentialPosition,
+              opponentTrail,
+              bike.state,
+              0
+            );
+
+            if (oppCollision.hit) {
+              collision = oppCollision;
+              break;
+            }
           }
         }
+
+        let newPosition = collision.corrected.clone();
+        newPosition = bike.physics.clampToBoundary(newPosition);
+
+        // If collision occurred, commit corrected position and break early so damage/logic below runs once
+        if (collision.hit) {
+          workingPosition.copy(newPosition);
+          break;
+        }
+
+        // No collision at this micro-step, commit and continue
+        workingPosition.copy(newPosition);
       }
 
-      let newPosition = collision.corrected.clone();
-      newPosition = bike.physics.clampToBoundary(newPosition);
+      // After sub-stepping, set final position
+      let newPosition = workingPosition.clone();
       
 
       
