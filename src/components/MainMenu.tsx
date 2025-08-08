@@ -1,4 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, lazy, Suspense } from 'react';
+
+const CustomiseMenu = lazy(() => import('./CustomiseMenu'));
 
 interface MainMenuProps {
   onStartPractice: () => void;
@@ -6,10 +8,23 @@ interface MainMenuProps {
   onSettings: () => void;
 }
 
+type MenuView = 'main' | 'casual' | 'competitive' | 'customise';
+
+const COLOR_OPTIONS = [
+  { name: 'cyan', hex: '#00ffff' },
+  { name: 'red', hex: '#ff3030' },
+  { name: 'gold', hex: '#ffd700' },
+  { name: 'violet', hex: '#7c4dff' },
+  { name: 'green', hex: '#00e676' },
+  { name: 'black', hex: '#111111' }
+];
+
 const MainMenu: React.FC<MainMenuProps> = ({ onStartPractice, onTutorial, onSettings }) => {
-  const [view, setView] = useState<'main' | 'casual' | 'competitive'>('main');
+  const [view, setView] = useState<MenuView>('main');
   const buttonsRef = useRef<HTMLButtonElement[]>([]);
   const [focusedIndex, setFocusedIndex] = useState<number>(0);
+  const [bikeColor, setBikeColor] = useState<string>('#00ffff');
+  const [trailColor, setTrailColor] = useState<string>('#00ffff');
 
   useEffect(() => {
     // Collect focusable buttons in current view
@@ -22,6 +37,19 @@ const MainMenu: React.FC<MainMenuProps> = ({ onStartPractice, onTutorial, onSett
       buttonsRef.current[0].focus();
     }
   }, [view]);
+
+  useEffect(() => {
+    // Load saved customization
+    try {
+      const saved = localStorage.getItem('cathexis-customization');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.bikeColor) setBikeColor(parsed.bikeColor);
+        if (parsed.trailColor) setTrailColor(parsed.trailColor);
+        // ignore legacy trailVariant
+      }
+    } catch {}
+  }, []);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -45,6 +73,24 @@ const MainMenu: React.FC<MainMenuProps> = ({ onStartPractice, onTutorial, onSett
     return () => window.removeEventListener('keydown', handler);
   }, [focusedIndex]);
 
+  const persistCustomization = (nextBike: string, nextTrail: string) => {
+    setBikeColor(nextBike);
+    setTrailColor(nextTrail);
+    try {
+      localStorage.setItem('cathexis-customization', JSON.stringify({ bikeColor: nextBike, trailColor: nextTrail }));
+    } catch {}
+  };
+
+  const handlePickBike = (hex: string) => {
+    persistCustomization(hex, trailColor);
+  };
+
+  const handlePickTrail = (hex: string) => {
+    persistCustomization(bikeColor, hex);
+  };
+
+  // no-op legacy handler removed
+
   return (
     <div className="main-menu-container">
       {/* Animated Grid Background */}
@@ -54,14 +100,16 @@ const MainMenu: React.FC<MainMenuProps> = ({ onStartPractice, onTutorial, onSett
         <div className="grid-glow"></div>
       </div>
       
-      {/* Leaderboard Button - Positioned in top right corner */}
-      <div className="leaderboard-corner-button">
-        <button className="leaderboard-button ui-text" disabled title="Competitive Leaderboard - Coming Soon">
-          <span className="leaderboard-icon">📊</span>
-          <span className="leaderboard-text">LEADERBOARD</span>
-          <span className="leaderboard-coming-soon">COMING SOON</span>
-        </button>
-      </div>
+      {/* Leaderboard Button - Only show on main view */}
+      {view === 'main' && (
+        <div className="leaderboard-corner-button">
+          <button className="leaderboard-button ui-text" disabled title="Competitive Leaderboard - Coming Soon">
+            <span className="leaderboard-icon">📊</span>
+            <span className="leaderboard-text">LEADERBOARD</span>
+            <span className="leaderboard-coming-soon">COMING SOON</span>
+          </button>
+        </div>
+      )}
 
       {/* Main Content */}
       <div className="menu-content">
@@ -84,6 +132,15 @@ const MainMenu: React.FC<MainMenuProps> = ({ onStartPractice, onTutorial, onSett
                 <span className="button-icon">🏆</span>
                 <span className="button-text">COMPETITIVE</span>
                 <span className="button-coming-soon">COMING SOON</span>
+              </span>
+            </button>
+            <button 
+              className="menu-button menu-button-secondary ui-text"
+              onClick={() => setView('customise')}
+            >
+              <span className="button-content">
+                <span className="button-icon">🎨</span>
+                <span className="button-text">CUSTOMISE</span>
               </span>
             </button>
             <button 
@@ -118,6 +175,24 @@ const MainMenu: React.FC<MainMenuProps> = ({ onStartPractice, onTutorial, onSett
               </span>
             </button>
           </div>
+        )}
+
+        {/* Customisation View */}
+        {view === 'customise' && (
+          <Suspense fallback={
+            <div className="customise-loading">
+              <div className="loading-spinner"></div>
+              <p className="ui-text">Loading customization...</p>
+            </div>
+          }>
+            <CustomiseMenu
+              bikeColor={bikeColor}
+              trailColor={trailColor}
+              onBikeColorChange={handlePickBike}
+              onTrailColorChange={handlePickTrail}
+              onBack={() => setView('main')}
+            />
+          </Suspense>
         )}
 
         {/* Submenu for Casual and Competitive */}

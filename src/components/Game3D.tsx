@@ -101,10 +101,21 @@ const Game3D: React.FC<Game3DProps> = ({
     directionalLight.position.set(5, 10, 7);
     scene.add(directionalLight);
 
+    // Load customization
+    let custom = { bikeColor: 0x00ffff, trailColor: 0x00ffff } as { bikeColor: number; trailColor: number };
+    try {
+      const raw = localStorage.getItem('cathexis-customization');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed.bikeColor) custom.bikeColor = Number(parsed.bikeColor.replace('#','0x'));
+        if (parsed.trailColor) custom.trailColor = Number(parsed.trailColor.replace('#','0x'));
+      }
+    } catch {}
+
     // Initialize game systems
     gameEngineRef.current = new GameEngine(DEFAULT_CONFIG);
-    bikeRendererRef.current = new BikeRenderer(scene);
-    trailRendererRef.current = new TrailRenderer(scene, DEFAULT_CONFIG);
+    bikeRendererRef.current = new BikeRenderer(scene, custom.bikeColor);
+    trailRendererRef.current = new TrailRenderer(scene, DEFAULT_CONFIG, custom.trailColor);
     arenaRendererRef.current = new ArenaRenderer(scene, DEFAULT_CONFIG);
     cameraControllerRef.current = new CameraController(camera);
     debugRendererRef.current = new DebugRenderer(scene);

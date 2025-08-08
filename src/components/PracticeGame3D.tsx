@@ -126,14 +126,25 @@ const PracticeGame3D: React.FC<PracticeGame3DProps> = ({
      gameEngineRef.current.addPlayerBike('player');
      gameEngineRef.current.addAIBike('ai');
 
-     // Create renderers for each bike
-     const playerBikeRenderer = new BikeRenderer(scene); // Default player bike (no color change)
-     const aiBikeRenderer = new ColoredBikeRenderer(scene, 0xff3030); // Bright red for AI
+      // Load customization
+      let custom = { bikeColor: 0x00ffff, trailColor: 0x00ffff } as { bikeColor: number; trailColor: number };
+      try {
+        const raw = localStorage.getItem('cathexis-customization');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed.bikeColor) custom.bikeColor = Number(parsed.bikeColor.replace('#','0x'));
+          if (parsed.trailColor) custom.trailColor = Number(parsed.trailColor.replace('#','0x'));
+        }
+      } catch {}
+
+      // Create renderers for each bike
+      const playerBikeRenderer = new ColoredBikeRenderer(scene, custom.bikeColor);
+      const aiBikeRenderer = new ColoredBikeRenderer(scene, 0xff3030); // Bright red for AI
      bikeRenderersRef.current.set('player', playerBikeRenderer);
      bikeRenderersRef.current.set('ai', aiBikeRenderer);
 
-     const playerTrailRenderer = new TrailRenderer(scene, DEFAULT_CONFIG, 0x00ffff); // Blue trail
-     const aiTrailRenderer = new TrailRenderer(scene, DEFAULT_CONFIG, 0xff3030); // Bright red trails
+      const playerTrailRenderer = new TrailRenderer(scene, DEFAULT_CONFIG, custom.trailColor);
+      const aiTrailRenderer = new TrailRenderer(scene, DEFAULT_CONFIG, 0xff3030);
      trailRenderersRef.current.set('player', playerTrailRenderer);
      trailRenderersRef.current.set('ai', aiTrailRenderer);
 

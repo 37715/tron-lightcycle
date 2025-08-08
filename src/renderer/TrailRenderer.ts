@@ -28,10 +28,10 @@ export class TrailRenderer {
     
     const material = new THREE.MeshStandardMaterial({
       color: this.color,
-      metalness: 0.1,
-      roughness: 0.8,
+      metalness: 0.25,
+      roughness: 0.55,
       emissive: new THREE.Color(this.color),
-      emissiveIntensity: 0.4,
+      emissiveIntensity: 0.5,
       transparent: false,
       depthWrite: true,
       polygonOffset: true,

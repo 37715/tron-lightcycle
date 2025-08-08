@@ -2,25 +2,26 @@ import * as THREE from 'three';
 
 export class BikeRenderer {
   private bikeGroup: THREE.Group;
+  private bodyMaterial: THREE.MeshStandardMaterial;
 
-  constructor(scene: THREE.Scene) {
-    this.bikeGroup = this.createBike();
+  constructor(scene: THREE.Scene, color: number = 0x00ffff) {
+    this.bikeGroup = this.createBike(color);
     scene.add(this.bikeGroup);
   }
 
-  private createBike(): THREE.Group {
+  private createBike(color: number): THREE.Group {
     const bikeGroup = new THREE.Group();
 
     // Main body - made shorter and less bulky
     const bodyGeometry = new THREE.BoxGeometry(0.25, 0.12, 0.6);
-    const bodyMaterial = new THREE.MeshStandardMaterial({
-      color: 0xff69b4, // HOT PINK to test changes are working
-      metalness: 0.2,
-      roughness: 0.6,
-      emissive: 0xff1493, // Bright pink emissive
-      emissiveIntensity: 0.3
+    this.bodyMaterial = new THREE.MeshStandardMaterial({
+      color: color,
+      metalness: 0.4,
+      roughness: 0.5,
+      emissive: color,
+      emissiveIntensity: 0.2
     });
-    const bodyMesh = new THREE.Mesh(bodyGeometry, bodyMaterial);
+    const bodyMesh = new THREE.Mesh(bodyGeometry, this.bodyMaterial);
     bodyMesh.position.y = 0.18;
     bikeGroup.add(bodyMesh);
 
@@ -51,5 +52,12 @@ export class BikeRenderer {
 
   public getBikeGroup(): THREE.Group {
     return this.bikeGroup;
+  }
+
+  public setColor(color: number): void {
+    if (this.bodyMaterial) {
+      this.bodyMaterial.color = new THREE.Color(color);
+      this.bodyMaterial.emissive = new THREE.Color(color);
+    }
   }
 }
