@@ -150,6 +150,8 @@ const PracticeGame3D: React.FC<PracticeGame3DProps> = ({
 
      arenaRendererRef.current = new ArenaRenderer(scene, DEFAULT_CONFIG);
      cameraControllerRef.current = new CameraController(camera);
+     // Prefer very smooth following by default; rotation smoothness still controlled by cameraTurnSpeed
+     cameraControllerRef.current.setFollowSmoothness(1.0);
      debugRendererRef.current = new DebugRenderer(scene);
 
      cameraControllerRef.current.setTurnSpeed(visualSettings.cameraTurnSpeed);
@@ -433,6 +435,8 @@ const PracticeGame3D: React.FC<PracticeGame3DProps> = ({
   useEffect(() => {
     if (cameraControllerRef.current && visualSettings) {
       cameraControllerRef.current.setTurnSpeed(visualSettings.cameraTurnSpeed);
+      // Re-apply follow smoothness after settings change to ensure it's in effect
+      cameraControllerRef.current.setFollowSmoothness(1.0);
     }
   }, [visualSettings]);
 

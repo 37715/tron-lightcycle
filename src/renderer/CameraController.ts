@@ -6,6 +6,12 @@ export class CameraController {
   private visualRotation = 0;
   private cameraRotation = 0;
   private turnSpeed = 0.5; // Default medium speed (0 = snappy, 1 = smooth)
+  
+  // Smoothing coefficients (fractions per frame)
+  // Lower values = smoother/slower; higher = snappier/faster
+  private positionLerp = 0.15;          // visualPosition follow speed
+  private visualRotationLerp = 0.15;    // visualRotation follow speed
+  private cameraPositionLerp = 0.08;    // camera.position follow speed
 
   constructor(camera: THREE.PerspectiveCamera) {
     this.camera = camera;
@@ -15,10 +21,25 @@ export class CameraController {
     // Clamp speed between 0 and 1
     this.turnSpeed = Math.max(0, Math.min(1, speed));
   }
+  
+  /**
+   * Controls how softly the camera follows position (not rotation).
+   * level: 0 = snappy, 1 = very smooth
+   */
+  public setFollowSmoothness(level: number): void {
+    const t = Math.max(0, Math.min(1, level));
+    // Map ranges: snappy→smooth
+    // positionLerp: 0.25 → 0.06
+    // visualRotationLerp: 0.25 → 0.10
+    // cameraPositionLerp: 0.12 → 0.04
+    this.positionLerp = 0.25 + (0.06 - 0.25) * t;
+    this.visualRotationLerp = 0.25 + (0.10 - 0.25) * t;
+    this.cameraPositionLerp = 0.12 + (0.04 - 0.12) * t;
+  }
 
   public update(bikePosition: THREE.Vector3, bikeRotation: number): void {
     // Smoothly interpolate visual position to follow actual bike position
-    this.visualPosition.lerp(bikePosition, 0.15);
+    this.visualPosition.lerp(bikePosition, this.positionLerp);
     
     // Calculate camera turn speed based on turnSpeed setting
     // turnSpeed: 0 = snappy (high values), 1 = smooth (low values)
@@ -29,7 +50,7 @@ export class CameraController {
     if (Math.abs(rotationDiff) > Math.PI) {
       rotationDiff = rotationDiff > 0 ? rotationDiff - 2 * Math.PI : rotationDiff + 2 * Math.PI;
     }
-    this.visualRotation += rotationDiff * 0.15; // Fixed fast rotation for bike visual
+    this.visualRotation += rotationDiff * this.visualRotationLerp; // Smoothed visual rotation
     
     const cameraDistance = 18;
     const cameraHeight = 14;
@@ -53,7 +74,7 @@ export class CameraController {
     const targetCameraPosition = this.visualPosition.clone().add(cameraOffset);
     
     // Smooth camera position following
-    this.camera.position.lerp(targetCameraPosition, 0.08);
+    this.camera.position.lerp(targetCameraPosition, this.cameraPositionLerp);
     this.camera.lookAt(this.visualPosition);
   }
 
