@@ -43,6 +43,8 @@ const Game3D: React.FC<Game3DProps> = ({
   const arenaRendererRef = useRef<ArenaRenderer>();
   const cameraControllerRef = useRef<CameraController>();
   const debugRendererRef = useRef<DebugRenderer>();
+  // Short rotation tween for single-bike mode
+  const rotationTweenRef = useRef<{ current: number; start: number; target: number; startTime: number; duration: number } | null>(null);
   
   const [gameState, setGameState] = useState<GameState>('playing'); // Start directly in playing state
   const [bikeHealth, setBikeHealth] = useState(100);
@@ -55,10 +57,9 @@ const Game3D: React.FC<Game3DProps> = ({
   const countdownRef = useRef<number | null>(countdown);
   const onGameOverRef = useRef<typeof onGameOver>(onGameOver);
   
-  // Frame rate limiting for better performance
-  const lastFrameTimeRef = useRef<number>(0);
-  const targetFPS = 60;
-  const frameInterval = 1000 / targetFPS;
+  // Fixed-step timing (decouple sim from render FPS)
+  const lastTimeRef = useRef<number>(0);
+  const accumulatorRef = useRef<number>(0);
 
   // Sync refs when corresponding state/props change
   useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
@@ -124,36 +125,48 @@ const Game3D: React.FC<Game3DProps> = ({
     arenaRendererRef.current.setGridVisible(visualSettings.showGrid);
   }, []); // <-- Remove visualSettings from dependency array
 
-  // Stable animation loop with frame rate limiting
+  // Stable animation loop with fixed 60 Hz simulation step
   const animate = useCallback((currentTime: number) => {
     if (!rendererRef.current || !sceneRef.current || !cameraRef.current) return;
     if (!gameEngineRef.current || !bikeRendererRef.current || !trailRendererRef.current ||
         !arenaRendererRef.current || !cameraControllerRef.current) return;
 
-    // Frame rate limiting
-    const deltaTime = currentTime - lastFrameTimeRef.current;
-    if (deltaTime < frameInterval) {
-      animationIdRef.current = requestAnimationFrame(animate);
-      return;
+    // Fixed timestep accumulator (60 Hz)
+    const FIXED_DT_MS = 1000 / 240; // 240 Hz sim to match original per-tick tuning
+    if (lastTimeRef.current === 0) {
+      lastTimeRef.current = currentTime;
     }
-    lastFrameTimeRef.current = currentTime;
+    let delta = currentTime - lastTimeRef.current;
+    lastTimeRef.current = currentTime;
+    // Prevent spiral of death on tab switch or hiccups
+    if (delta > 250) delta = 250;
+    accumulatorRef.current += delta;
 
     // Only update game when playing and not paused / counting down
-    if (gameStateRef.current === 'playing' && !isPausedRef.current && countdownRef.current === null) {
-      const { newHealth } = gameEngineRef.current.update();
-      if (newHealth <= 0) {
-        onGameOverRef.current?.();
-      }
+    let performedSteps = 0;
+    const MAX_STEPS = 10;
+    while (
+      gameStateRef.current === 'playing' &&
+      !isPausedRef.current &&
+      countdownRef.current === null &&
+      accumulatorRef.current >= FIXED_DT_MS &&
+      performedSteps < MAX_STEPS
+    ) {
+      gameEngineRef.current.update();
+      accumulatorRef.current -= FIXED_DT_MS;
+      performedSteps++;
+    }
 
-      // Health sync (respect runtime max health)
-      const maxH = gameEngineRef.current.getBikeState().maxHealth;
-      const actualHealth = Math.max(0, Math.min(maxH, newHealth));
+    if (performedSteps > 0) {
+      // Health sync (respect runtime max health) after stepping
+      const state = gameEngineRef.current.getBikeState();
+      const maxH = state.maxHealth;
+      const actualHealth = Math.max(0, Math.min(maxH, state.health));
       const healthPercentage = (actualHealth / maxH) * 100;
-      // Lower threshold so small zone damage steps are reflected immediately
       setBikeHealth(prev => (Math.abs(prev - healthPercentage) > 0.01 ? healthPercentage : prev));
 
       // Brake energy sync – always set
-      setBrakeEnergy(gameEngineRef.current.getBikeState().brakeEnergy);
+      setBrakeEnergy(state.brakeEnergy);
 
       // Update visual components
       const bikeState = gameEngineRef.current.getBikeState();
@@ -161,10 +174,39 @@ const Game3D: React.FC<Game3DProps> = ({
       const cameraController = cameraControllerRef.current;
       cameraController.update(bikeState.position, bikeState.rotation);
 
-      bikeRendererRef.current.updatePosition(
-        cameraController.getVisualPosition(),
-        cameraController.getVisualRotation()
-      );
+      const now = currentTime;
+      const angleNormalize = (a: number) => {
+        let x = a;
+        while (x <= -Math.PI) x += Math.PI * 2;
+        while (x > Math.PI) x -= Math.PI * 2;
+        return x;
+      };
+      const duration = 60;
+      const easeOutSine = (t: number) => Math.sin((t * Math.PI) / 2);
+      if (!rotationTweenRef.current) {
+        rotationTweenRef.current = {
+          current: bikeState.rotation,
+          start: bikeState.rotation,
+          target: bikeState.rotation,
+          startTime: now,
+          duration
+        };
+      }
+      const tween = rotationTweenRef.current;
+      const desired = bikeState.rotation;
+      const deltaAngle = angleNormalize(desired - tween.target);
+      if (Math.abs(deltaAngle) > 0.001) {
+        tween.start = tween.current;
+        tween.target = desired;
+        tween.startTime = now;
+        tween.duration = duration;
+      }
+      const t = Math.min(1, Math.max(0, (now - tween.startTime) / tween.duration));
+      const eased = easeOutSine(t);
+      const d = angleNormalize(tween.target - tween.start);
+      tween.current = angleNormalize(tween.start + d * eased);
+      if (t >= 1) tween.current = tween.target;
+      bikeRendererRef.current.updatePosition(bikeState.position, tween.current);
 
       // Handle trail updates in the correct order: remove first, then add, then update
       // 1. Remove old segments first

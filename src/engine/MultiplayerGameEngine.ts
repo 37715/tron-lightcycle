@@ -132,7 +132,7 @@ export class MultiplayerGameEngine {
       minDistF: this.config.rubberMinDist,
       
       turnQueue: [],
-      cycleDelay: this.config.turnDelayFrames / 60.0,
+      cycleDelay: this.config.turnDelayFrames / 240.0,
       lastTurnTime: 0,
       
       accelBase: this.config.accelBase,

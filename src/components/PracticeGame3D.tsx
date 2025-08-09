@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { MultiplayerGameEngine } from '../engine/MultiplayerGameEngine';
 import { DEFAULT_CONFIG } from '../engine/config';
-import { GameState, GameConfig } from '../engine/types';
+import { GameState } from '../engine/types';
 import { BikeRenderer } from '../renderer/BikeRenderer';
 import { TrailRenderer } from '../renderer/TrailRenderer';
 import { ArenaRenderer } from '../renderer/ArenaRenderer';
@@ -57,6 +57,9 @@ const PracticeGame3D: React.FC<PracticeGame3DProps> = ({
   const rendererRef = useRef<THREE.WebGLRenderer>();
   const cameraRef = useRef<THREE.PerspectiveCamera>();
   const animationIdRef = useRef<number>();
+  // Fixed-step timing
+  const lastTimeRef = useRef<number>(0);
+  const accumulatorRef = useRef<number>(0);
   
   // Game engine and renderers
   const gameEngineRef = useRef<MultiplayerGameEngine>();
@@ -65,12 +68,20 @@ const PracticeGame3D: React.FC<PracticeGame3DProps> = ({
   const arenaRendererRef = useRef<ArenaRenderer>();
   const cameraControllerRef = useRef<CameraController>();
   const debugRendererRef = useRef<DebugRenderer>();
+  // Visual rotation tween per bike
+  const rotationTweenRef = useRef<Map<string, {
+    current: number;
+    start: number;
+    target: number;
+    startTime: number;
+    duration: number;
+  }>>(new Map());
   
-  const [gameState, setGameState] = useState<GameState>('playing');
+  const [gameState] = useState<GameState>('playing');
   const [playerHealth, setPlayerHealth] = useState(100);
-  const [aiHealth, setAIHealth] = useState(100);
+  const [, setAIHealth] = useState(100);
   const [brakeEnergy, setBrakeEnergy] = useState(100);
-  const [countdown, setCountdown] = useState<number | null>(null);
+  const [countdown] = useState<number | null>(null);
 
   // Refs for mutable values
   const gameStateRef = useRef<GameState>(gameState);
@@ -150,21 +161,43 @@ const PracticeGame3D: React.FC<PracticeGame3DProps> = ({
 
      arenaRendererRef.current = new ArenaRenderer(scene, DEFAULT_CONFIG);
      cameraControllerRef.current = new CameraController(camera);
-     // Prefer very smooth following by default; rotation smoothness still controlled by cameraTurnSpeed
-     cameraControllerRef.current.setFollowSmoothness(1.0);
      debugRendererRef.current = new DebugRenderer(scene);
 
      cameraControllerRef.current.setTurnSpeed(visualSettings.cameraTurnSpeed);
      arenaRendererRef.current.setGridVisible(visualSettings.showGrid);
   }, []); // <-- Remove visualSettings from dependency array
 
-  const animate = useCallback(() => {
+  const animate = useCallback((currentTime: number) => {
     if (!rendererRef.current || !sceneRef.current || !cameraRef.current) return;
     if (!gameEngineRef.current || !arenaRendererRef.current || !cameraControllerRef.current) return;
 
+    // Fixed timestep accumulator (60 Hz)
+    const FIXED_DT_MS = 1000 / 240; // 240 Hz sim to match original per-tick tuning
+    if (lastTimeRef.current === 0) {
+      lastTimeRef.current = currentTime;
+    }
+    let delta = currentTime - lastTimeRef.current;
+    lastTimeRef.current = currentTime;
+    // Prevent spiral of death
+    if (delta > 250) delta = 250;
+    accumulatorRef.current += delta;
+
     // Only update game when playing and not paused
-    if (gameStateRef.current === 'playing' && !isPausedRef.current && countdownRef.current === null) {
-      const healthUpdates = gameEngineRef.current.update();
+    let performedSteps = 0;
+    const MAX_STEPS = 10;
+    while (
+      gameStateRef.current === 'playing' &&
+      !isPausedRef.current &&
+      countdownRef.current === null &&
+      accumulatorRef.current >= FIXED_DT_MS &&
+      performedSteps < MAX_STEPS
+    ) {
+      gameEngineRef.current.update();
+      accumulatorRef.current -= FIXED_DT_MS;
+      performedSteps++;
+    }
+
+    if (performedSteps > 0) {
       // Debug: log zone state for player on spawn to diagnose no-damage issue
       const arena = gameEngineRef.current.getArena();
       const playerStateDbg = gameEngineRef.current.getBikeState('player');
@@ -179,21 +212,18 @@ const PracticeGame3D: React.FC<PracticeGame3DProps> = ({
       
       const playerBike = gameEngineRef.current.getBikeState('player');
       const aiBike = gameEngineRef.current.getBikeState('ai');
-      
-      // Update health displays
-      healthUpdates.forEach((update, bikeId) => {
-        const maxH = gameEngineRef.current!.getBikeState(bikeId)?.maxHealth ?? DEFAULT_CONFIG.maxHealth ?? 100;
-        const actualHealth = Math.max(0, Math.min(maxH, update.newHealth));
-        const healthPercentage = (actualHealth / maxH) * 100;
-        
-        if (bikeId === 'player') {
-          setPlayerHealth(prev => (Math.abs(prev - healthPercentage) > 0.01 ? healthPercentage : prev));
-          const playerState = gameEngineRef.current!.getBikeState('player');
-          setBrakeEnergy(playerState?.brakeEnergy || 0);
-        } else if (bikeId === 'ai') {
-          setAIHealth(prev => (Math.abs(prev - healthPercentage) > 0.01 ? healthPercentage : prev));
-        }
-      });
+      // Health/energy UI from current states (after fixed steps)
+      if (playerBike) {
+        const maxH = playerBike.maxHealth ?? DEFAULT_CONFIG.maxHealth ?? 100;
+        const hpPct = (Math.max(0, Math.min(maxH, playerBike.health)) / maxH) * 100;
+        setPlayerHealth(prev => (Math.abs(prev - hpPct) > 0.01 ? hpPct : prev));
+        setBrakeEnergy(playerBike.brakeEnergy || 0);
+      }
+      if (aiBike) {
+        const maxH = aiBike.maxHealth ?? DEFAULT_CONFIG.maxHealth ?? 100;
+        const hpPct = (Math.max(0, Math.min(maxH, aiBike.health)) / maxH) * 100;
+        setAIHealth(prev => (Math.abs(prev - hpPct) > 0.01 ? hpPct : prev));
+      }
 
       // Update visual components for each bike
       gameEngineRef.current!.getAllBikes().forEach((bikeData, bikeId) => {
@@ -201,18 +231,47 @@ const PracticeGame3D: React.FC<PracticeGame3DProps> = ({
         const trailRenderer = trailRenderersRef.current.get(bikeId);
         
         if (bikeRenderer && trailRenderer) {
-          // Update bike position
+          // Short rotation tween (position exact). 60ms ease-out to avoid lag
+          const angleNormalize = (a: number) => {
+            let x = a;
+            while (x <= -Math.PI) x += Math.PI * 2;
+            while (x > Math.PI) x -= Math.PI * 2;
+            return x;
+          };
+          const duration = 60; // ms
+          const easeOutSine = (t: number) => Math.sin((t * Math.PI) / 2);
+          const map = rotationTweenRef.current;
+          let tween = map.get(bikeId);
+          if (!tween) {
+            tween = {
+              current: bikeData.state.rotation,
+              start: bikeData.state.rotation,
+              target: bikeData.state.rotation,
+              startTime: currentTime,
+              duration
+            };
+            map.set(bikeId, tween);
+          }
+          const desired = bikeData.state.rotation;
+          const deltaAngle = angleNormalize(desired - tween.target);
+          if (Math.abs(deltaAngle) > 0.001) {
+            tween.start = tween.current;
+            tween.target = desired;
+            tween.startTime = currentTime;
+            tween.duration = duration;
+          }
+          const t = Math.min(1, Math.max(0, (currentTime - tween.startTime) / tween.duration));
+          const eased = easeOutSine(t);
+          const d = angleNormalize(tween.target - tween.start);
+          tween.current = angleNormalize(tween.start + d * eased);
+          if (t >= 1) tween.current = tween.target;
+          map.set(bikeId, tween);
+
+          bikeRenderer.updatePosition(bikeData.state.position, tween.current);
+
           if (bikeId === 'player' && playerBike) {
-            // Camera follows player
             const cameraController = cameraControllerRef.current!;
-            cameraController.update(bikeData.state.position, bikeData.state.rotation);
-            bikeRenderer.updatePosition(
-              cameraController.getVisualPosition(),
-              cameraController.getVisualRotation()
-            );
-          } else {
-            // AI bike just updates position
-            bikeRenderer.updatePosition(bikeData.state.position, bikeData.state.rotation);
+            cameraController.update(bikeData.state.position, tween.current);
           }
 
           // Update trail
@@ -435,8 +494,6 @@ const PracticeGame3D: React.FC<PracticeGame3DProps> = ({
   useEffect(() => {
     if (cameraControllerRef.current && visualSettings) {
       cameraControllerRef.current.setTurnSpeed(visualSettings.cameraTurnSpeed);
-      // Re-apply follow smoothness after settings change to ensure it's in effect
-      cameraControllerRef.current.setFollowSmoothness(1.0);
     }
   }, [visualSettings]);
 

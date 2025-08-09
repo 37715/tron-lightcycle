@@ -2,12 +2,12 @@ import { GameConfig } from './types';
 
 export const DEFAULT_CONFIG: GameConfig = {
   // Bike constants - optimized for performance and proper grinding
-  bikeSpeed: 0.050,           // Adjusted from 0.045 for better balance
+  bikeSpeed: 0.050,           // Original per-tick speed (paired with 240 Hz sim)
   maxHealth: 122,             // ~30% more than 94 to lengthen TTK consistently across modes
   speedTarget: 0.050,         // Keep consistent with bikeSpeed         
   cycleSpeedDecayBelow: 0.01, 
   cycleSpeedDecayAbove: 0.002,
-  turnDelayFrames: 22,        // Increased slightly from 20 for more deliberate turns
+  turnDelayFrames: 20,        // Balanced responsiveness at 240 Hz sim
   boundaryLimit: 44.975,
   regenDelayFrames: 60,
   

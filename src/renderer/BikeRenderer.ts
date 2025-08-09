@@ -1,12 +1,16 @@
 import * as THREE from 'three';
 
 export class BikeRenderer {
-  private bikeGroup: THREE.Group;
+  private rootGroup: THREE.Group; // pivot at bike front
+  private bikeGroup: THREE.Group; // visual meshes, offset so front aligns with pivot
   private bodyMaterial: THREE.MeshStandardMaterial;
 
   constructor(scene: THREE.Scene, color: number = 0x00ffff) {
+    // Root pivot at the bike's front axle
+    this.rootGroup = new THREE.Group();
     this.bikeGroup = this.createBike(color);
-    scene.add(this.bikeGroup);
+    this.rootGroup.add(this.bikeGroup);
+    scene.add(this.rootGroup);
   }
 
   private createBike(color: number): THREE.Group {
@@ -42,12 +46,16 @@ export class BikeRenderer {
     backWheel.position.set(0, 0.12, -0.25);
     bikeGroup.add(backWheel);
 
+    // Offset the visual group so that the bike's FRONT sits at the root (pivot) position
+    // With wheels at ±0.25, shifting by -0.25 aligns front axle at world origin.
+    bikeGroup.position.z = -0.25;
+
     return bikeGroup;
   }
 
   public updatePosition(position: THREE.Vector3, rotation: number): void {
-    this.bikeGroup.position.copy(position);
-    this.bikeGroup.rotation.y = rotation;
+    this.rootGroup.rotation.y = rotation;
+    this.rootGroup.position.copy(position);
   }
 
   public getBikeGroup(): THREE.Group {
