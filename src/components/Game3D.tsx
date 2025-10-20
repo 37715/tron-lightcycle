@@ -1,74 +1,76 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
+import { GameEngine } from '../engine/gameEngine';
+import { DEFAULT_CONFIG } from '../engine/config';
+import { GameState } from '../engine/types';
+import { BikeRenderer } from '../renderer/BikeRenderer';
+import { TrailRenderer } from '../renderer/TrailRenderer';
+import { ArenaRenderer } from '../renderer/ArenaRenderer';
+import { CameraController } from '../renderer/CameraController';
 
-interface BikeState {
-  position: THREE.Vector3;
-  rotation: number;
-  trail: THREE.Vector3[];
-  alive: boolean;
-  speed: number;
-  lastTurnFrame: number;
-  health: number;
-  maxHealth: number;
-  grindOffset: number;
-  grindNormal: THREE.Vector3 | null;
+interface Game3DProps {
+  onSettings?: () => void;
+  onGameOver?: () => void;
+  onResume?: () => void;
+  shouldResume?: boolean;
+  isPaused?: boolean;
+  visualSettings?: {
+    fov: number;
+    showGrid: boolean;
+    cameraTurnSpeed: number;
+  };
 }
 
-// Tunable gameplay constants
-const BIKE_SPEED = 0.08; // slightly slower default speed
-const TURN_DELAY_FRAMES = 20; // minimum frames between consecutive turns
-const BOUNDARY_LIMIT = 44.975; // nearly flush with the wall
-const TRAIL_HIT_DISTANCE = 0.2; // tighter trail hitbox
-const REGEN_DELAY_FRAMES = 60; // start regenerating after ~1s
-const DAMAGE_RATE = 0.8; // health lost per frame while pushing into a wall
-
-const TRAIL_START_HEIGHT = 0.2; // height near the bike
-const TRAIL_END_HEIGHT = 0.5;   // final wall height
-const TAPER_DISTANCE = 1;       // distance over which to reach full height
-
-const Game3D: React.FC = () => {
+const Game3D: React.FC<Game3DProps> = ({
+  onSettings,
+  onGameOver,
+  onResume,
+  shouldResume,
+  isPaused = false,
+  visualSettings = { fov: 75, showGrid: true, cameraTurnSpeed: 0.5 }
+}) => {
   const mountRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene>();
   const rendererRef = useRef<THREE.WebGLRenderer>();
   const cameraRef = useRef<THREE.PerspectiveCamera>();
-  const bikeRef = useRef<THREE.Mesh>();
-  const trailMeshesRef = useRef<THREE.Mesh[]>([]);
   const animationIdRef = useRef<number>();
-  const frameCountRef = useRef<number>(0);
-  const cameraRotationRef = useRef<number>(0);
-  const lastHitFrameRef = useRef<number>(0);
-  const distanceSinceTurnRef = useRef<number>(0);
   
-  const [gameState, setGameState] = useState<'waiting' | 'playing' | 'gameOver'>('waiting');
+  // Game engine and renderers
+  const gameEngineRef = useRef<GameEngine>();
+  const bikeRendererRef = useRef<BikeRenderer>();
+  const trailRendererRef = useRef<TrailRenderer>();
+  const arenaRendererRef = useRef<ArenaRenderer>();
+  const cameraControllerRef = useRef<CameraController>();
+  
+  const [gameState, setGameState] = useState<GameState>('playing'); // Start directly in playing state
   const [bikeHealth, setBikeHealth] = useState(100);
-  
-  // Use a ref for bike state so animation loop always has latest value
-  const bikeStateRef = useRef<BikeState>({
-    position: new THREE.Vector3(0, 0, 0),
-    rotation: 0,
-    trail: [],
-    alive: true,
-    speed: BIKE_SPEED,
-    lastTurnFrame: 0,
-    health: 100,
-    maxHealth: 100,
-    grindOffset: 0,
-    grindNormal: null
-  });
+  const [brakeEnergy, setBrakeEnergy] = useState(100);
+  const [countdown, setCountdown] = useState<number | null>(null);
 
-  const turnQueueRef = useRef<string[]>([]);
+  // Refs for mutable values accessed in animation loop
+  const gameStateRef = useRef<GameState>(gameState);
+  const isPausedRef = useRef<boolean>(isPaused);
+  const countdownRef = useRef<number | null>(countdown);
+  const onGameOverRef = useRef<typeof onGameOver>(onGameOver);
 
+  // Sync refs when corresponding state/props change
+  useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
+  useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
+  useEffect(() => { countdownRef.current = countdown; }, [countdown]);
+  useEffect(() => { onGameOverRef.current = onGameOver; }, [onGameOver]);
+
+  // Only create initScene once on mount
   const initScene = useCallback(() => {
     if (!mountRef.current) return;
 
     // Scene setup
     const scene = new THREE.Scene();
-    scene.fog = new THREE.Fog(0x000000, 30, 150);
+    scene.fog = new THREE.Fog(0x0a0a0a, 40, 180);
     sceneRef.current = scene;
 
-    // Camera setup - third person following camera
+    // Camera setup
     const camera = new THREE.PerspectiveCamera(
-      75,
+      visualSettings.fov,
       window.innerWidth / window.innerHeight,
       0.1,
       1000
@@ -77,383 +79,156 @@ const Game3D: React.FC = () => {
     cameraRef.current = camera;
 
     // Renderer setup
-    const renderer = new THREE.WebGLRenderer({ antialias: false });
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setClearColor(0x000000);
+    renderer.setClearColor(0xf0f0f0);
     renderer.shadowMap.enabled = false;
     mountRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
-    // Grid floor - more subtle and modern
-    const gridSize = 200;
-    const gridDivisions = 50;
-    const gridHelper = new THREE.GridHelper(gridSize, gridDivisions, 0x111111, 0x0a0a0a);
-    gridHelper.position.y = -0.5;
-    scene.add(gridHelper);
-
-    // Bike geometry - sleeker, more modern design
-    const bikeGeometry = new THREE.BoxGeometry(0.3, 0.2, 0.8);
-    const bikeMaterial = new THREE.MeshBasicMaterial({ 
-      color: 0x00ff88,
-      transparent: true,
-      opacity: 0.95
-    });
-    const bikeMesh = new THREE.Mesh(bikeGeometry, bikeMaterial);
-    bikeMesh.position.set(0, 0, 0);
-    scene.add(bikeMesh);
-    bikeRef.current = bikeMesh;
-
-    // Lighting - minimal for performance
-    const ambientLight = new THREE.AmbientLight(0x202020, 0.8);
+    // Lighting
+    const ambientLight = new THREE.HemisphereLight(0xffffff, 0x444444, 1.0);
     scene.add(ambientLight);
 
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.4);
-    directionalLight.position.set(10, 10, 5);
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.6);
+    directionalLight.position.set(5, 10, 7);
     scene.add(directionalLight);
 
-    // Boundary walls - thinner and more minimal
-    const wallHeight = 1.5;
-    const wallThickness = 0.05;
-    const boundarySize = 45;
-    
-    const wallMaterial = new THREE.MeshBasicMaterial({ 
-      color: 0x666666, 
-      opacity: 0.3, 
-      transparent: true 
-    });
-    
-    // Create boundary walls
-    const walls = [
-      { pos: [0, wallHeight/2, boundarySize] as [number, number, number], size: [boundarySize*2, wallHeight, wallThickness] as [number, number, number] },
-      { pos: [0, wallHeight/2, -boundarySize] as [number, number, number], size: [boundarySize*2, wallHeight, wallThickness] as [number, number, number] },
-      { pos: [boundarySize, wallHeight/2, 0] as [number, number, number], size: [wallThickness, wallHeight, boundarySize*2] as [number, number, number] },
-      { pos: [-boundarySize, wallHeight/2, 0] as [number, number, number], size: [wallThickness, wallHeight, boundarySize*2] as [number, number, number] }
-    ];
+    // Initialize game systems
+    gameEngineRef.current = new GameEngine(DEFAULT_CONFIG);
+    bikeRendererRef.current = new BikeRenderer(scene);
+    trailRendererRef.current = new TrailRenderer(scene, DEFAULT_CONFIG);
+    arenaRendererRef.current = new ArenaRenderer(scene, DEFAULT_CONFIG);
+    cameraControllerRef.current = new CameraController(camera);
 
-    walls.forEach(wall => {
-      const geometry = new THREE.BoxGeometry(...wall.size);
-      const mesh = new THREE.Mesh(geometry, wallMaterial);
-      mesh.position.set(...wall.pos);
-      scene.add(mesh);
-    });
+    cameraControllerRef.current.setTurnSpeed(visualSettings.cameraTurnSpeed);
+    arenaRendererRef.current.setGridVisible(visualSettings.showGrid);
+  }, []); // <-- Remove visualSettings from dependency array
 
-  }, []);
-
-  const createTrailSegment = useCallback((start: THREE.Vector3, end: THREE.Vector3, startDistance: number) => {
-    if (!sceneRef.current) return;
-
-    const direction = new THREE.Vector3().subVectors(end, start);
-    const length = direction.length();
-
-    if (length < 0.1) return;
-
-    const geometry = new THREE.BoxGeometry(0.02, TRAIL_END_HEIGHT, length, 1, 1, 1);
-
-    // Taper only within the first meter after a turn
-    const posAttr = geometry.attributes.position as THREE.BufferAttribute;
-    for (let i = 0; i < posAttr.count; i++) {
-      const z = posAttr.getZ(i); // -length/2 to length/2
-      const t = (z + length / 2) / length; // 0 at start, 1 at end
-      const dist = startDistance + t * length;
-      const progress = Math.min(dist / TAPER_DISTANCE, 1);
-      const height = THREE.MathUtils.lerp(TRAIL_START_HEIGHT, TRAIL_END_HEIGHT, progress);
-      const scale = height / TRAIL_END_HEIGHT;
-      posAttr.setY(i, posAttr.getY(i) * scale);
-    }
-    posAttr.needsUpdate = true;
-
-    const material = new THREE.MeshBasicMaterial({
-      color: 0x00ffff,
-      transparent: true,
-      opacity: 0.6
-    });
-
-    const trailMesh = new THREE.Mesh(geometry, material);
-
-    const midpoint = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
-    trailMesh.position.copy(midpoint);
-
-    trailMesh.lookAt(end);
-
-    sceneRef.current.add(trailMesh);
-    trailMeshesRef.current.push(trailMesh);
-  }, []);
-
-  const checkCollisions = useCallback((position: THREE.Vector3, trail: THREE.Vector3[]): { hit: boolean; normal: THREE.Vector3 | null } => {
-    // Check boundary collisions with very small tolerance
-    const bikeHalfWidth = 0.15;
-    if (Math.abs(position.x) + bikeHalfWidth > BOUNDARY_LIMIT) {
-      return { hit: true, normal: new THREE.Vector3(Math.sign(position.x), 0, 0) };
-    }
-    if (Math.abs(position.z) + bikeHalfWidth > BOUNDARY_LIMIT) {
-      return { hit: true, normal: new THREE.Vector3(0, 0, Math.sign(position.z)) };
-    }
-
-    // Check trail collisions with precise hitbox
-    if (trail.length > 2) {
-      for (let i = 0; i < trail.length - 2; i++) {
-        const start = trail[i];
-        const end = trail[i + 1];
-        const segDir = new THREE.Vector3().subVectors(end, start);
-        const segLength = segDir.length();
-        if (segLength === 0) continue;
-        const segNorm = segDir.clone().normalize();
-        const toPoint = new THREE.Vector3().subVectors(position, start);
-        const proj = THREE.MathUtils.clamp(toPoint.dot(segNorm), 0, segLength);
-        const closest = start.clone().add(segNorm.multiplyScalar(proj));
-        const dist = closest.distanceTo(position);
-        if (dist < TRAIL_HIT_DISTANCE) {
-          const normal = position.clone().sub(closest).normalize();
-          return { hit: true, normal };
-        }
-      }
-    }
-
-    return { hit: false, normal: null };
-  }, []);
-
-  const updateBike = useCallback(() => {
-    if (gameState !== 'playing') return;
-
-    frameCountRef.current++;
-
-    const bike = bikeStateRef.current;
-    if (!bike.alive) return;
-
-    let newRotation = bike.rotation;
-    let newLastTurnFrame = bike.lastTurnFrame;
-    
-    // Simple delay to keep consecutive turns slightly apart
-    const framesSinceLastTurn = frameCountRef.current - bike.lastTurnFrame;
-    const canTurn = framesSinceLastTurn >= TURN_DELAY_FRAMES;
-    
-    if (canTurn && turnQueueRef.current.length > 0) {
-      const turn = turnQueueRef.current.shift();
-      if (turn === 'left') {
-        newRotation += Math.PI / 2;
-      } else if (turn === 'right') {
-        newRotation -= Math.PI / 2;
-      }
-      newLastTurnFrame = frameCountRef.current;
-      distanceSinceTurnRef.current = 0;
-    }
-
-    // Move forward based on current rotation
-    const direction = new THREE.Vector3(
-      Math.sin(newRotation),
-      0,
-      Math.cos(newRotation)
-    );
-    
-    const potentialPosition = bike.position.clone().add(direction.multiplyScalar(bike.speed));
-
-    // Check collisions BEFORE moving
-    let currentHealth = bike.health;
-    let newPosition = potentialPosition.clone();
-    let newGrindOffset = bike.grindOffset;
-    let newGrindNormal = bike.grindNormal;
-
-    const collision = checkCollisions(potentialPosition, bike.trail);
-    if (collision.hit) {
-      // Start from the attempted position and clamp against the wall so
-      // motion parallel to the surface is preserved
-      newPosition.copy(potentialPosition);
-      if (collision.normal) {
-        if (Math.abs(newPosition.x) + 0.15 > BOUNDARY_LIMIT && collision.normal.x !== 0) {
-          newPosition.x = Math.sign(newPosition.x) * (BOUNDARY_LIMIT - 0.15);
-        }
-        if (Math.abs(newPosition.z) + 0.15 > BOUNDARY_LIMIT && collision.normal.z !== 0) {
-          newPosition.z = Math.sign(newPosition.z) * (BOUNDARY_LIMIT - 0.15);
-        }
-        newGrindNormal = collision.normal.clone();
-        const push = direction.dot(newGrindNormal);
-        if (push > 0) {
-          newGrindOffset = Math.min(bike.grindOffset + 0.02, 0.3);
-          currentHealth = Math.max(0, bike.health - DAMAGE_RATE);
-          setBikeHealth(currentHealth);
-          lastHitFrameRef.current = frameCountRef.current;
-        } else if (newGrindOffset > 0) {
-          newGrindOffset = Math.max(0, newGrindOffset - 0.02);
-        }
-        newPosition.add(newGrindNormal.clone().multiplyScalar(-newGrindOffset));
-      } else {
-        // Unknown normal - just stay put and take damage
-        newPosition.copy(bike.position);
-        currentHealth = Math.max(0, bike.health - DAMAGE_RATE);
-        setBikeHealth(currentHealth);
-        lastHitFrameRef.current = frameCountRef.current;
-      }
-    } else {
-      // Not colliding
-      newGrindNormal = null;
-      newGrindOffset = 0;
-    }
-
-    // Regenerate health if enough time passed since last hit
-    const framesSinceHit = frameCountRef.current - lastHitFrameRef.current;
-    if (framesSinceHit > REGEN_DELAY_FRAMES && currentHealth < bike.maxHealth) {
-      currentHealth = Math.min(bike.maxHealth, currentHealth + 0.5);
-      setBikeHealth(currentHealth);
-    }
-
-    // Recover grind offset gradually when not pressing into a wall
-    if (!collision.hit && newGrindOffset > 0) {
-      newGrindOffset = Math.max(0, newGrindOffset - 0.02);
-      if (newGrindNormal) {
-        newPosition.add(newGrindNormal.clone().multiplyScalar(-newGrindOffset));
-      }
-      if (newGrindOffset === 0) {
-        newGrindNormal = null;
-      }
-    }
-
-    // Add to trail every certain distance
-    const newTrail = [...bike.trail];
-    if (newTrail.length === 0 || newPosition.distanceTo(newTrail[newTrail.length - 1]) > 0.5) {
-      if (newTrail.length > 0) {
-        createTrailSegment(newTrail[newTrail.length - 1], newPosition, distanceSinceTurnRef.current);
-        distanceSinceTurnRef.current += newPosition.distanceTo(newTrail[newTrail.length - 1]);
-      }
-      newTrail.push(newPosition.clone());
-    }
-
-    // Update the bike state ref
-    bikeStateRef.current = {
-      ...bike,
-      position: newPosition,
-      rotation: newRotation,
-      trail: newTrail,
-      lastTurnFrame: newLastTurnFrame,
-      health: currentHealth,
-      maxHealth: bike.maxHealth,
-      grindOffset: newGrindOffset,
-      grindNormal: newGrindNormal,
-      alive: currentHealth > 0
-    };
-  }, [gameState, checkCollisions, createTrailSegment]);
-
-  const updateCamera = useCallback(() => {
-    if (!cameraRef.current) return;
-
-    const bike = bikeStateRef.current;
-    if (!bike.alive) return;
-
-    const camera = cameraRef.current;
-    
-    // Camera follows behind the bike with very slow rotation
-    const cameraDistance = 20;
-    const cameraHeight = 15;
-    
-    // Smoothly interpolate camera rotation
-    const rotationDiff = bike.rotation - cameraRotationRef.current;
-    
-    // Handle rotation wrapping for shortest path
-    let adjustedDiff = rotationDiff;
-    if (Math.abs(rotationDiff) > Math.PI) {
-      adjustedDiff = rotationDiff > 0 ? rotationDiff - 2 * Math.PI : rotationDiff + 2 * Math.PI;
-    }
-    
-    // VERY slow rotation following (0.02 = 2% per frame)
-    cameraRotationRef.current += adjustedDiff * 0.04;
-    
-    // Calculate camera position behind the bike based on smoothed rotation
-    const cameraOffset = new THREE.Vector3(
-      -Math.sin(cameraRotationRef.current) * cameraDistance,
-      cameraHeight,
-      -Math.cos(cameraRotationRef.current) * cameraDistance
-    );
-
-    const targetCameraPosition = bike.position.clone().add(cameraOffset);
-    
-    // Smooth camera position movement
-    camera.position.lerp(targetCameraPosition, 0.06);
-    
-    // Look at the bike
-    camera.lookAt(bike.position);
-  }, []);
-
+  // Stable animation loop
   const animate = useCallback(() => {
     if (!rendererRef.current || !sceneRef.current || !cameraRef.current) return;
+    if (!gameEngineRef.current || !bikeRendererRef.current || !trailRendererRef.current ||
+        !arenaRendererRef.current || !cameraControllerRef.current) return;
 
-    updateBike();
+    // Only update game when playing and not paused / counting down
+    if (gameStateRef.current === 'playing' && !isPausedRef.current && countdownRef.current === null) {
+      const { newHealth } = gameEngineRef.current.update();
+      if (newHealth <= 0) {
+        onGameOverRef.current?.();
+      }
 
-    const bike = bikeStateRef.current;
+      // Health sync
+      const actualHealth = Math.max(0, Math.min(156, newHealth));
+      const healthPercentage = (actualHealth / 156) * 100;
+      setBikeHealth(prev => (Math.abs(prev - healthPercentage) > 0.1 ? healthPercentage : prev));
 
-    // Update bike mesh position and rotation
-    if (bikeRef.current) {
-      bikeRef.current.position.copy(bike.position);
-      bikeRef.current.rotation.y = bike.rotation;
-    }
+      // Brake energy sync – always set
+      setBrakeEnergy(gameEngineRef.current.getBikeState().brakeEnergy);
 
-    updateCamera();
+      // Update visual components
+      const bikeState = gameEngineRef.current.getBikeState();
+      const arena = gameEngineRef.current.getArena();
+      const cameraController = cameraControllerRef.current;
+      cameraController.update(bikeState.position, bikeState.rotation);
 
-    // Check if bike died
-    if (!bike.alive && gameState === 'playing') {
-      setGameState('gameOver');
+      bikeRendererRef.current.updatePosition(
+        cameraController.getVisualPosition(),
+        cameraController.getVisualRotation()
+      );
+
+      trailRendererRef.current.updateTrailGeometry();
+
+      // Handle new & old trail segments
+      gameEngineRef.current.getNewTrailSegments().forEach(segment => {
+        trailRendererRef.current?.createTrailSegment(segment.start, segment.end);
+      });
+      for (let i = 0, n = gameEngineRef.current.getSegmentsToRemove(); i < n; i++) {
+        trailRendererRef.current?.removeOldestTrailSegment();
+      }
+
+      const isOutsideRing = arena.isPositionOutsideRing(bikeState.position);
+      arenaRendererRef.current.updateRings(
+        arena.getRingScale(),
+        gameEngineRef.current.getFrameCount(),
+        isOutsideRing
+      );
     }
 
     rendererRef.current.render(sceneRef.current, cameraRef.current);
     animationIdRef.current = requestAnimationFrame(animate);
-  }, [updateBike, updateCamera, gameState]);
+  }, []); // empty deps => stable
 
   const handleKeyDown = useCallback((event: KeyboardEvent) => {
+    if (!gameEngineRef.current) return;
+
     const key = event.key.toLowerCase();
-    if (key === 'z' || key === 'arrowleft') {
-      turnQueueRef.current.push('left');
+
+    // Dynamic read of keybinds each press (from localStorage)
+    let keyBinds = {
+      turnLeft: ['z', 'arrowleft'],
+      turnRight: ['x', 'arrowright'],
+      brake: ['space']
+    };
+    try {
+      const saved = localStorage.getItem('hypoxia-keybinds');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        keyBinds = {
+          turnLeft: parsed.turnLeft || ['z', 'arrowleft'],
+          turnRight: parsed.turnRight || ['x', 'arrowright'],
+          brake: parsed.brake || ['space']
+        };
+      }
+    } catch {/* ignore */}
+
+    if (key === 'escape' && onSettings) {
+      onSettings();
       event.preventDefault();
-    } else if (key === 'x' || key === 'arrowright') {
-      turnQueueRef.current.push('right');
+    } else if (keyBinds.turnLeft.includes(key) && !isPausedRef.current && countdownRef.current === null) {
+      gameEngineRef.current.queueTurn('left');
+      event.preventDefault();
+    } else if (keyBinds.turnRight.includes(key) && !isPausedRef.current && countdownRef.current === null) {
+      gameEngineRef.current.queueTurn('right');
+      event.preventDefault();
+    } else if (keyBinds.brake.includes(key === ' ' ? 'space' : key) && !isPausedRef.current && countdownRef.current === null) {
+      gameEngineRef.current.setBraking(true);
       event.preventDefault();
     }
   }, []);
 
   const handleKeyUp = useCallback((event: KeyboardEvent) => {
+    if (!gameEngineRef.current) return;
     const key = event.key.toLowerCase();
-    if (key === 'z' || key === 'arrowleft' || key === 'x' || key === 'arrowright') {
+
+    let keyBinds = {
+      turnLeft: ['z', 'arrowleft'],
+      turnRight: ['x', 'arrowright'],
+      brake: ['space']
+    };
+    try {
+      const saved = localStorage.getItem('hypoxia-keybinds');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        keyBinds = {
+          turnLeft: parsed.turnLeft || ['z', 'arrowleft'],
+          turnRight: parsed.turnRight || ['x', 'arrowright'],
+          brake: parsed.brake || ['space']
+        };
+      }
+    } catch {/* ignore */}
+
+    if (keyBinds.brake.includes(key === ' ' ? 'space' : key)) {
+      gameEngineRef.current.setBraking(false);
       event.preventDefault();
     }
   }, []);
 
-  const startGame = useCallback(() => {
-    // Clear existing trail meshes
-    trailMeshesRef.current.forEach(mesh => {
-      if (sceneRef.current) {
-        sceneRef.current.remove(mesh);
-      }
-    });
-    trailMeshesRef.current = [];
-
-    // Reset bike state
-    const initialPosition = new THREE.Vector3(0, 0, 0);
-    bikeStateRef.current = {
-      position: initialPosition,
-      rotation: 0,
-      trail: [initialPosition.clone()],
-      alive: true,
-      speed: BIKE_SPEED,
-      lastTurnFrame: 0,
-      health: 100,
-      maxHealth: 100,
-      grindOffset: 0,
-      grindNormal: null
-    };
-
-    // Reset bike mesh position
-    if (bikeRef.current) {
-      bikeRef.current.position.copy(initialPosition);
-      bikeRef.current.rotation.y = 0;
+  const resumeGame = useCallback(() => {
+    if (onResume) {
+      onResume();
     }
-
-    // Clear any queued turns
-    turnQueueRef.current = [];
-    frameCountRef.current = 0;
-    cameraRotationRef.current = 0;
-    lastHitFrameRef.current = 0;
-    distanceSinceTurnRef.current = 0;
-
-    setBikeHealth(100);
-    setGameState('playing');
-  }, []);
+  }, [onResume]);
 
   const handleResize = useCallback(() => {
     if (!cameraRef.current || !rendererRef.current) return;
@@ -463,6 +238,7 @@ const Game3D: React.FC = () => {
     rendererRef.current.setSize(window.innerWidth, window.innerHeight);
   }, []);
 
+  // Init + listeners effect (runs once)
   useEffect(() => {
     initScene();
 
@@ -470,34 +246,57 @@ const Game3D: React.FC = () => {
     window.addEventListener('keyup', handleKeyUp);
     window.addEventListener('resize', handleResize);
 
+    const currentMount = mountRef.current;
+
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('resize', handleResize);
-      
-      if (animationIdRef.current) {
-        cancelAnimationFrame(animationIdRef.current);
+      if (animationIdRef.current) cancelAnimationFrame(animationIdRef.current);
+      if (rendererRef.current && currentMount && currentMount.contains(rendererRef.current.domElement)) {
+        currentMount.removeChild(rendererRef.current.domElement);
       }
-      
-      if (rendererRef.current && mountRef.current && mountRef.current.contains(rendererRef.current.domElement)) {
-        mountRef.current.removeChild(rendererRef.current.domElement);
-      }
+      trailRendererRef.current?.dispose();
+      rendererRef.current?.dispose();
     };
-  }, [initScene, handleKeyDown, handleKeyUp, handleResize]);
+  }, []); // <-- empty dependencies so initScene runs ONCE
 
+  // Kick off animation loop once on mount
   useEffect(() => {
-    if (gameState === 'playing') {
-      animationIdRef.current = requestAnimationFrame(animate);
-    } else if (animationIdRef.current) {
-      cancelAnimationFrame(animationIdRef.current);
-    }
-
+    animationIdRef.current = requestAnimationFrame(animate);
     return () => {
-      if (animationIdRef.current) {
-        cancelAnimationFrame(animationIdRef.current);
-      }
+      if (animationIdRef.current) cancelAnimationFrame(animationIdRef.current);
     };
-  }, [gameState, animate]);
+  }, [animate]);
+
+  // Handle resume from parent
+  useEffect(() => {
+    if (shouldResume) {
+      resumeGame();
+    }
+  }, [shouldResume, resumeGame]);
+
+  // Update camera FOV when visual settings change
+  useEffect(() => {
+    if (cameraRef.current && visualSettings) {
+      cameraRef.current.fov = visualSettings.fov;
+      cameraRef.current.updateProjectionMatrix();
+    }
+  }, [visualSettings]);
+
+  // Update grid visibility when visual settings change
+  useEffect(() => {
+    if (arenaRendererRef.current && visualSettings) {
+      arenaRendererRef.current.setGridVisible(visualSettings.showGrid);
+    }
+  }, [visualSettings]);
+
+  // Update camera turn speed when visual settings change
+  useEffect(() => {
+    if (cameraControllerRef.current && visualSettings) {
+      cameraControllerRef.current.setTurnSpeed(visualSettings.cameraTurnSpeed);
+    }
+  }, [visualSettings]);
 
   return (
     <div className="relative w-full h-screen overflow-hidden">
@@ -505,65 +304,83 @@ const Game3D: React.FC = () => {
       
       {/* UI Overlay */}
       <div className="absolute top-4 left-4 text-white z-10">
-        <h1 className="text-2xl font-bold text-green-400 mb-2">3D TRON BIKE</h1>
-        <div className="text-sm text-gray-400">
-          <p>Z/← Turn Left | X/→ Turn Right</p>
+        <h1 className="text-2xl font-bold text-blue-400 mb-2 ui-text">hypoxia</h1>
+        <div className="text-sm text-gray-300 ui-text">
+          <p>Z/← Turn Left | X/→ Turn Right | Space Brake</p>
           <p>Avoid walls and your own trail!</p>
+          <p className="text-xs opacity-50 mt-1">Press ESC to open menu</p>
+          {gameEngineRef.current?.getBikeState().isBraking && (
+            <p className="text-yellow-400 font-bold">🛑 BRAKING ACTIVE</p>
+          )}
+          {gameState === 'playing' && gameEngineRef.current && trailRendererRef.current && (
+            <div className="mt-2 text-xs opacity-60">
+              <p>Trail Points: {gameEngineRef.current.getTrailLength()}</p>
+              <p>Rendered Segments: {trailRendererRef.current.getTrailMeshCount()}</p>
+              <p>Trail Age: {Math.floor(gameEngineRef.current.getActiveTrailFrameSpan() / 60)}s</p>
+              {gameEngineRef.current.getBikeState().graceFramesRemaining > 0 && (
+                <p className="text-yellow-400 font-bold">
+                  GRACE: {Math.ceil(gameEngineRef.current.getBikeState().graceFramesRemaining / 60 * 1000)}ms
+                </p>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Health Bar */}
+      {/* Health Bar and Brake Meter */}
       {gameState === 'playing' && (
-        <div className="absolute top-4 right-4 z-10">
-          <div className="w-64 h-6 bg-gray-800 rounded-full overflow-hidden border border-gray-600">
+        <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 z-10">
+          {/* Brake Meter */}
+          <div className="brake-meter-container">
             <div
-              className="h-full transition-all duration-200"
-              style={{
-                width: `${bikeHealth}%`,
-                backgroundColor: `hsl(${(bikeHealth / 100) * 120}, 100%, 50%)`
-              }}
+              className={`brake-meter-fill brake-meter-width ${
+                brakeEnergy <= 0 ? 'brake-depleted' :
+                (gameEngineRef.current?.getBikeState().brakeRechargeDelay || 0) > 0 ? 'brake-recharging' : 'brake-available'
+              }`}
+               style={{ width: `${Math.max(brakeEnergy, 0)}%` }}
+             />
+          </div>
+          <div className="brake-meter-text text-center">
+            BRAKE
+          </div>
+          
+          {/* Health Bar */}
+          <div className="health-bar-container">
+            <div
+              className={`health-bar-fill health-bar-width ${
+                (gameEngineRef.current && gameEngineRef.current.getBikeState().graceFramesRemaining > 0) ? 'health-grace' :
+                bikeHealth > 60 ? 'health-high' : 
+                bikeHealth > 30 ? 'health-medium' : 
+                bikeHealth > 15 ? 'health-low' : 'health-critical'
+              }`}
+              style={{ '--health-width': `${Math.max(bikeHealth, 0)}%` } as React.CSSProperties}
             />
           </div>
-          <p className="text-xs text-gray-400 mt-1 text-right">
-            Health: {Math.round(bikeHealth)}%
-          </p>
-        </div>
-      )}
-
-      {gameState === 'waiting' && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-80 z-20">
-          <div className="text-center text-white">
-            <h2 className="text-3xl font-bold mb-4 text-green-400">READY TO RACE?</h2>
-            <p className="mb-6 text-gray-300">Navigate the 3D grid. Make 90° turns only.</p>
-            <button
-              onClick={startGame}
-              className="px-8 py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded transition-colors"
-            >
-              START GAME
-            </button>
+          <div className="health-bar-text text-center">
+            {(gameEngineRef.current && gameEngineRef.current.getBikeState().graceFramesRemaining > 0) ? (
+              <>GRACE PERIOD</>
+            ) : (
+              <>HEALTH</>
+            )}
           </div>
         </div>
       )}
 
-      {gameState === 'gameOver' && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-90 z-20">
-          <div className="text-center text-white">
-            <h2 className="text-3xl font-bold mb-4 text-red-400">GAME OVER</h2>
-            <p className="mb-6 text-gray-300">You crashed into a wall or trail!</p>
-            <button
-              onClick={startGame}
-              className="px-8 py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded transition-colors"
-            >
-              PLAY AGAIN
-            </button>
+      {/* Countdown Display */}
+      {countdown !== null && (
+        <div className="absolute inset-0 flex items-center justify-center z-30">
+          <div className="countdown-display">
+            <div className={`countdown-number countdown-${countdown}`}>
+              {countdown}
+            </div>
           </div>
         </div>
       )}
 
       {/* Performance indicator */}
       <div className="absolute bottom-4 right-4 text-xs text-gray-500 z-10">
-        <p>Optimized for maximum performance</p>
-        <p>Minimal graphics • 60+ FPS target</p>
+        <p>Instanced Rendering • Esports Optimized</p>
+        <p>Trail: {trailRendererRef.current?.getTrailMeshCount() || 0} segments • 60+ FPS</p>
       </div>
     </div>
   );
